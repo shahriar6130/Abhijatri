@@ -74,7 +74,7 @@ jobs:
           uv export --frozen --no-emit-project -o requirements.txt
           uvx pip-audit -r requirements.txt --disable-pip
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
