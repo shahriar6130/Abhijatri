@@ -702,3 +702,58 @@ Still open, owner actions:
 - **F-01:** rotate the Supabase password, update Railway `DATABASE_URL`, and remove the audit PDF from `backend-dev` history.
 - **F-04 remainder:** the Tailwind 4 migration.
 - **F-08:** the `ruff format` team decision.
+
+
+### 5.13 Verification, ops dashboard completion and deployment (27 October 2026)
+
+**Scope.** A full check of `Guest-Identity-and-Visits.md` and `System-Monitoring-Dashboard.md` against the code, the gaps closed, the local and live setup checked, and the dashboard deployed. Nothing was committed or pushed by the assistant; the owner pushes git.
+
+**Audit result.** Both documents match the code. Static audits (backend, frontend, ops app) found no missing feature; they found the gaps below, all closed.
+
+**Fixes in code**
+- **Tests ignored the developer's `.env`.** `.env` enabled the staff test header and set the ops token, so 6 tests failed on a developer machine. `tests/conftest.py` now disables `.env`, defaults `APP_ENV` to `development`, and points the app's own engine at `TEST_DATABASE_URL` when it is set, so tests never touch the dev database.
+- **Unhandled errors were not counted as 5xx.** `app/main.py`: the counting middleware now counts a raised exception as a 500 (and `route_5xx:<template>`), then re-raises. Before, the Traffic panel would have missed real failures.
+- **`reviews.submitted` was allowlisted but never counted.** `app/api.py` now counts it after a guest review commits.
+- **Stale comment** about Redis being deferred in `app/config.py` replaced.
+- **Frontend:** the guest review form notice now says the review is shown as "Anonymous guest" and that reviews from one browser share a guest tag (EN and BN); `recordDailyVisit` shares one in-flight request, so React StrictMode or two tabs send one visit.
+- **Ops app:** panel layout now comes from `GET /ops/panels` (`getCatalogue`, `orderByCatalogue`); table headers are bilingual.
+- **CI:** the public-build check fails if `frontend/dist` is empty and also looks for `abhijatri-ops`.
+
+**Tests added (all green)**
+- Backend: 5xx by route template, 60/minute limit, `no-store` on 200/401/404/429, CORS preflight with the `Authorization` header (ops origin allowed, others not), real counts in the content and traffic panels, health panel without secrets, log redaction filter (`test_log_redaction.py`), `reviews.submitted` counted.
+- Frontend: overlapping visit calls send one request; the review payload never sends a guest tag.
+- Ops app: API client (header only, `sessionStorage` only, error mapping), block rendering in both languages, catalogue ordering.
+
+**Results.** Backend 341 passed, 0 skipped (with `TEST_DATABASE_URL` set to the local `abhijatri_test` database on port 5434); ruff and mypy clean. Frontend 40 tests and build pass. Ops app 19 tests and build pass.
+
+**Local environment.** Postgres and Redis run from `compose.yaml` (`POSTGRES_PORT=5434`). Supabase is used only in production. The development database is at migration `0009_guest_tag_visit_stats`. All six panels returned `ok` on the local API.
+
+**Deployment state (27 October 2026)**
+- **Railway** (`sincere-warmth`, service `abhijatri-api`, production): deploy `a337d5c` on `main` is live at `https://abhijatri-backend.up.railway.app`. It has `OPS_DASHBOARD_TOKEN`, `REDIS_URL` and `CORS_ALLOWED_ORIGINS`. The ops routes answer `401` without a token, and the CORS preflight accepts `https://abhijatri-ops-44afee.vercel.app`. **This deploy predates the fixes above; they go live when `backend-dev` is merged to `main`.**
+- **Vercel** (account `syedmuhtasimapon-8894`, project `abhijatri-ops-44afee`, root `ops/`): `VITE_API_BASE_URL` set for Production to the Railway address, and `ops/` redeployed to production. The served bundle contains the Railway address and no localhost fallback; the response carries `X-Robots-Tag: noindex, nofollow, noarchive` and the strict CSP. The Vercel MCP connector was first signed in as a different account and was re-authorized as `syedmuhtasimapon-8894`.
+- The full test steps are in `Docs/System-Monitoring-Dashboard.md` section 12.
+
+**Open items (owner actions)**
+- Merge `backend-dev` to `main` so Railway redeploys the fixes.
+- Add the public frontend's Vercel origin to Railway `CORS_ALLOWED_ORIGINS` once it is known.
+- Add GitHub secrets `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` for the nightly roll-up workflow.
+- Check the live dashboard with the production token (the assistant never reads or prints it).
+- Still open from earlier: `visit_daily_stats` counters are nullable everywhere although only legacy days may be `NULL`; no frontend component tests; member visits wait for R04.
+Step 3: GitHub secrets for the nightly roll-up
+
+  1. Open the repo on GitHub: https://github.com/shahriar6130/Abhijatri. You
+     need admin or owner rights to add secrets. If the repo belongs to your
+     teammate, ask them to do this.
+  2. Go to Settings → Secrets and variables → Actions → New repository secret.
+  3. Add the first secret: Name OPS_API_URL, Secret
+     https://abhijatri-backend.up.railway.app (no trailing slash needed). Click
+     Add secret.
+  4. Add the second secret: Name OPS_DASHBOARD_TOKEN, Secret the same ops token
+     that is set on Railway. The Railway and local tokens may differ. Don't
+     paste the token into chat or commit it.
+  5. Test it: go to Actions → Nightly visit roll-up → Run workflow, pick the
+     branch, and run. A green run with "rolled_up" in the log means it works. A
+     green run that prints "secrets are not set; skipping" means a secret name
+     is wrong, so check the spelling.
+  6. After that it runs by itself at 00:15 Dhaka.
+**Update, 27 October 2026 (later): live Redis fixed.** The Upstash password saved in Railway `REDIS_URL` was rejected ("invalid username-password pair"), so the Health panel showed Redis down and Visitors and Traffic were degraded. The Upstash MCP server was added (`claude mcp add --scope user upstash https://mcp.upstash.com/mcp`, authorized in `/mcp`), the correct `rediss://` URL for the database `Abhijatri` (`first-monarch-177806.upstash.io`, ap-southeast-1) was tested with a PING, and `REDIS_URL` was set on Railway. After the redeploy (deploy `cd66c42d`, commit `a337d5c`, SUCCESS) all six panels returned `ok`, Redis `up` at 1.9 ms, and the counter flush is running. Visit counters start at 0 on the live site. Two things to remember: the dashboard must be opened at the fixed address `https://abhijatri-ops-44afee.vercel.app` (per-deployment Vercel addresses are not in `CORS_ALLOWED_ORIGINS`), and it needs Railway's `OPS_DASHBOARD_TOKEN`, which differs from the one in `backend/.env`.

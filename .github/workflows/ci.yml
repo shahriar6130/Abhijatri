@@ -110,7 +110,10 @@ jobs:
         name: Public build carries no ops dashboard code (System-Monitoring-Dashboard 11)
         working-directory: frontend
         run: |
-          if grep -rIl -e "/api/v1/ops" -e "OPS_DASHBOARD_TOKEN" -e "abhijatri_ops_token" dist; then
+          if [ -z "$(ls -A dist 2>/dev/null)" ]; then
+            echo "frontend/dist is empty: the check below would pass for the wrong reason."; exit 1
+          fi
+          if grep -rIl -e "/api/v1/ops" -e "OPS_DASHBOARD_TOKEN" -e "abhijatri_ops_token" -e "abhijatri-ops" dist; then
             echo "The public frontend build must not reference the ops dashboard."; exit 1
           fi
 

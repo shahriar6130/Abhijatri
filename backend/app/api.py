@@ -31,6 +31,7 @@ from app.models import (
     User,
     UserPlatformRole,
 )
+from app.ops import events
 from app.redis_client import RedisDep
 from app.schemas import (
     CategoryParameter,
@@ -175,6 +176,7 @@ def create_guest_review(
         # 7. Business transaction.
         result = submit_guest_review(session, payload)
         session.commit()
+        events.count("reviews.submitted")
     except ReviewError as error:
         session.rollback()
         _raise_service_error(error)

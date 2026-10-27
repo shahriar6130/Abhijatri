@@ -52,6 +52,17 @@ export interface PanelData {
   notes: Localized[];
 }
 
+/** One row of GET /ops/panels: the layout is built from this (System-Monitoring-Dashboard 5). */
+export interface CatalogueEntry {
+  id: string;
+  title: Localized;
+  version: number;
+  refresh_seconds: number;
+  permission: string;
+  sources: string[];
+  owner: string;
+}
+
 export interface Overview {
   generated_at: string;
   days: number;

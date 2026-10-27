@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BlockList } from './Blocks';
-import { API_BASE, OpsError, describeError, getOverview, getPanel, loadToken, runRollup, saveToken } from './api';
+import {
+  API_BASE,
+  OpsError,
+  describeError,
+  getCatalogue,
+  getOverview,
+  getPanel,
+  loadToken,
+  orderByCatalogue,
+  runRollup,
+  saveToken,
+} from './api';
 import { formatTime } from './format';
 import type { Days, Lang, PanelData } from './types';
 
@@ -98,9 +109,11 @@ function Dashboard({
 
   const load = useCallback(() => {
     setError(null);
-    getOverview(token, days)
-      .then((overview) => {
-        setPanels(overview.panels);
+    // The catalogue sets the layout; a catalogue failure alone must not hide the data.
+    const catalogue = getCatalogue(token).then((c) => c.panels, (err) => (err instanceof OpsError && err.status === 401 ? Promise.reject(err) : []));
+    Promise.all([getOverview(token, days), catalogue])
+      .then(([overview, entries]) => {
+        setPanels(orderByCatalogue(overview.panels, entries));
         setLoadedAt(overview.generated_at);
       })
       .catch(handleError);

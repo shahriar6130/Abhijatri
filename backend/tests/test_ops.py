@@ -276,3 +276,126 @@ def test_the_middleware_counts_status_classes(fake: fakeredis.FakeRedis) -> None
     counted = events.pending()
     assert counted.get("http.2xx", 0) >= 1
     assert counted.get("http.4xx", 0) >= 1
+
+
+def test_a_5xx_is_counted_by_route_template_never_by_raw_path(fake: fakeredis.FakeRedis) -> None:
+    events.flush(fakeredis.FakeRedis(server=fakeredis.FakeServer()))
+    application = create_app()
+
+    @application.get("/boom/{item_id}")
+    def boom(item_id: str) -> None:
+        raise RuntimeError("boom")
+
+    TestClient(application, raise_server_exceptions=False).get("/boom/secret-id-123")
+    counted = events.pending()
+    assert counted.get("http.5xx", 0) >= 1
+    assert counted.get("route_5xx:/boom/{item_id}", 0) == 1
+    assert not any("secret-id-123" in name for name in counted)
+
+
+# ---- headers, limits and CORS ----
+
+
+@pytest.mark.parametrize(("method", "path"), ROUTES)
+def test_the_disabled_api_still_sends_no_store(
+    method: str, path: str, fake: fakeredis.FakeRedis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPS_DASHBOARD_TOKEN", raising=False)
+    get_settings.cache_clear()
+    response = _app(fake).request(method, path, headers=AUTH)
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    get_settings.cache_clear()
+
+
+def test_the_ops_origin_passes_the_preflight_with_the_authorization_header(
+    fake: fakeredis.FakeRedis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ops_origin = "https://abhijatri-ops-44afee.vercel.app"
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", f"http://localhost:5173,{ops_origin}")
+    get_settings.cache_clear()
+    try:
+        client = _app(fake)
+        preflight = client.options(
+            "/api/v1/ops/overview",
+            headers={
+                "Origin": ops_origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == ops_origin
+        assert "authorization" in preflight.headers["access-control-allow-headers"].lower()
+        assert "access-control-allow-credentials" not in preflight.headers
+
+        stranger = client.options(
+            "/api/v1/ops/overview",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        assert "access-control-allow-origin" not in stranger.headers
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.integration
+def test_more_than_60_requests_a_minute_are_rate_limited(
+    token: None, postgres_session: Session, fake: fakeredis.FakeRedis
+) -> None:
+    client = _app(fake, postgres_session)
+    headers = {**AUTH, "X-Forwarded-For": "203.0.113.50"}
+    codes = [client.get("/api/v1/ops/panels", headers=headers).status_code for _ in range(61)]
+    assert codes[:60] == [200] * 60
+    assert codes[60] == 429
+
+
+@pytest.mark.integration
+def test_error_responses_are_never_cached(token: None, postgres_session: Session, fake: fakeredis.FakeRedis) -> None:
+    client = _app(fake, postgres_session)
+    headers = {"Authorization": "Bearer nope", "X-Forwarded-For": "203.0.113.77"}
+    responses = [client.get("/api/v1/ops/panels", headers=headers) for _ in range(11)]
+    assert [r.status_code for r in responses] == [401] * 10 + [429]
+    assert all(r.headers["cache-control"] == "no-store" for r in responses)
+
+
+# ---- panel contents on real data ----
+
+
+@pytest.mark.integration
+def test_content_and_traffic_panels_show_real_counts(
+    token: None, postgres_session: Session, fake: fakeredis.FakeRedis
+) -> None:
+    postgres_session.add(Destination(status=DestinationStatus.PUBLISHED, name_bn="কক্সবাজার", name_en="Cox"))
+    postgres_session.add(Destination(status=DestinationStatus.PUBLISHED, name_bn="সাজেক", name_en="Sajek"))
+    postgres_session.commit()
+    events.flush(fakeredis.FakeRedis(server=fakeredis.FakeServer()))
+    events.count("http.2xx", 3)
+    events.count("http.4xx", 2)
+    events.flush(fake)
+    client = _app(fake, postgres_session)
+
+    def values(panel_id: str) -> dict:
+        body = client.get(f"/api/v1/ops/panels/{panel_id}?days=7", headers=AUTH).json()
+        return {block["key"]: block.get("value") for block in body["blocks"]}
+
+    assert values("content")["destinations_published"] == 2
+    traffic = values("traffic")
+    assert traffic["http_2xx"] >= 3
+    assert traffic["http_4xx"] >= 2
+
+
+@pytest.mark.integration
+def test_health_panel_reports_database_and_redis_state(
+    token: None, postgres_session: Session, fake: fakeredis.FakeRedis
+) -> None:
+    body = _app(fake, postgres_session).get("/api/v1/ops/panels/health", headers=AUTH).json()
+    assert body["status"] in {"ok", "degraded"}
+    keys = {block["key"] for block in body["blocks"]}
+    assert keys, "the health panel must show something"
+    text = json.dumps(body, ensure_ascii=False)
+    assert TOKEN not in text
+    assert get_settings().database_url.split("@")[-1] not in text  # no connection details

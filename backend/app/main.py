@@ -135,7 +135,13 @@ def create_app() -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         # Status classes and route templates only, never raw paths (Dashboard doc 6.3, PF 26).
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # An unhandled exception becomes a 500 in Starlette's outermost handler, after this
+            # middleware; count it here or the dashboard's 5xx numbers would miss real failures.
+            _count_response(request, 500)
+            raise
         _count_response(request, response.status_code)
         return response
 
