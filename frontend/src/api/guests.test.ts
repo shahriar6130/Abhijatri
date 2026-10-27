@@ -145,6 +145,14 @@ describe('recordDailyVisit', () => {
     expect(bodies()).toEqual([{ first_visit: true }, { first_visit: false }]);
   });
 
+  it('two overlapping calls (StrictMode, two effects) send one request', async () => {
+    vi.stubGlobal('localStorage', memoryStorage());
+    const [first, second] = await Promise.all([recordDailyVisit(day1), recordDailyVisit(day1)]);
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+    expect(bodies()).toEqual([{ first_visit: true }]);
+  });
+
   it('a failed request is retried on the next load', async () => {
     vi.stubGlobal('localStorage', memoryStorage());
     fetchMock.mockImplementationOnce(async () => {

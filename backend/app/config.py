@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     public_cache_max_age_seconds: int = Field(default=60, ge=0, le=3600)
     allow_test_staff_header: bool = False
     rate_limit_enabled: bool = True
-    # Storage for the in-memory-style burst pre-filter. Redis is deferred (Decisions.md), so the
-    # default is per-process memory; set redis://... only when Redis is actually provisioned.
+    # Storage for the in-memory-style burst pre-filter. The default is per-process memory; Upstash
+    # (REDIS_URL) is used for the visit counters only, not for this limiter (Decisions.md, 22 Oct 2026).
     rate_limit_storage_uri: str = Field(default="memory://", min_length=1)
     rate_limit_guest_submit: str = "5/minute"  # in-memory burst pre-filter only (PF 14.5)
     rate_limit_receipt: str = "10/minute"  # in-memory burst pre-filter only (PF 14.5)

@@ -400,8 +400,8 @@ export const GuestReviewForm: React.FC<{
           <ShieldCheck size={16} className="text-forest-primary dark:text-neon-lime shrink-0" aria-hidden="true" />
           <span>
             {t(
-              'আপনার রিভিউ একজন মডারেটর পড়ার পর প্রকাশিত হবে, প্রদর্শন নামসহ এবং "অতিথি" লেবেলে। অতিথি রেটিং শুধু আলাদা "অতিথি মতামত"-এ গণনা হয়। জমা দেওয়ার পর একটি রিসিপ্ট একবারই দেখানো হবে; সেটি দিয়ে অবস্থা দেখা ও প্রত্যাহার করা যাবে। হারানো রিসিপ্ট পুনরুদ্ধার করা যায় না।',
-              'A moderator reads your review before it is published with your display name and a "Guest" label. Guest ratings count only towards the separate Guest Feedback. After submitting you see a receipt once; it lets you check status and withdraw. A lost receipt cannot be recovered.',
+              'আপনার রিভিউ একজন মডারেটর পড়ার পর প্রকাশিত হবে "বেনামী অতিথি" হিসেবে। এই ব্রাউজার থেকে দেওয়া আপনার সব রিভিউতে একই অতিথি ট্যাগ দেখানো হবে, যাতে পাঠকরা বুঝতে পারেন সেগুলো একই অতিথির। অতিথি রেটিং শুধু আলাদা "অতিথি মতামত"-এ গণনা হয়। জমা দেওয়ার পর একটি রিসিপ্ট একবারই দেখানো হবে; সেটি দিয়ে অবস্থা দেখা ও প্রত্যাহার করা যাবে। হারানো রিসিপ্ট পুনরুদ্ধার করা যায় না।',
+              'A moderator reads your review before it is published as "Anonymous guest". Your reviews from this browser show the same guest tag, so readers can see they came from the same guest. Guest ratings count only towards the separate Guest Feedback. After submitting you see a receipt once; it lets you check status and withdraw. A lost receipt cannot be recovered.',
             )}
           </span>
         </p>

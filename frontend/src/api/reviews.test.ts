@@ -85,6 +85,12 @@ describe('buildGuestReviewPayload (API.md 5.2)', () => {
     expect(payload.receipt_secret).toMatch(/^abr1_/);
   });
 
+  it('never sends a guest tag: the server derives it from the scope secret', () => {
+    const payload = buildGuestReviewPayload(draft(), { sendCategoryRatings: false });
+    expect(payload).not.toHaveProperty('guest_tag');
+    expect(payload).toHaveProperty('guest_scope_secret');
+  });
+
   it('never sends unknown fields while the API does not accept category ratings', () => {
     const payload = buildGuestReviewPayload(draft({ categoryRatings: { FOOD: 4 } }), { sendCategoryRatings: false });
     expect(payload).not.toHaveProperty('category_ratings');
