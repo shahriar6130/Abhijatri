@@ -4,6 +4,7 @@ import { Search, Activity, Menu, X, Compass } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { checkBackendHealth } from '../../api/health';
 import { PreferenceToggles } from './PreferenceToggles';
+import { NotificationBell } from './NotificationBell';
 
 interface NavbarProps {
   onToggleSidebar?: () => void;
@@ -83,6 +84,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
             </span>
           </Link>
 
+          <NotificationBell />
           <PreferenceToggles />
         </div>
       </div>

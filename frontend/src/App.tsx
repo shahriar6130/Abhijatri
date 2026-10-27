@@ -7,6 +7,12 @@ import { AppLayout } from './components/layout/AppLayout';
 import { PublicLayout } from './components/layout/PublicLayout';
 import { LandingPage } from './pages/LandingPage';
 import { SignInPage } from './pages/SignInPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { VerificationPage } from './pages/VerificationPage';
+import { AppealsPage } from './pages/AppealsPage';
 import { GuestEntryPage } from './pages/GuestEntryPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { DestinationsPage } from './pages/DestinationsPage';
@@ -30,6 +36,10 @@ export const App: React.FC = () => {
                 <Route index element={<LandingPage />} />
                 <Route path="guest" element={<GuestEntryPage />} />
                 <Route path="login" element={<SignInPage />} />
+                <Route path="register" element={<RegisterPage />} />
+                <Route path="verify-email" element={<VerifyEmailPage />} />
+                <Route path="forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="reset-password" element={<ResetPasswordPage />} />
               </Route>
 
               <Route element={<AppLayout />}>
@@ -41,6 +51,8 @@ export const App: React.FC = () => {
                 <Route path="trips" element={<SavedTripsPage />} />
                 <Route path="reviews" element={<ReviewsPage />} />
                 <Route path="health" element={<HealthCheckPage />} />
+                <Route path="account/verification" element={<VerificationPage />} />
+                <Route path="account/appeals" element={<AppealsPage />} />
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />

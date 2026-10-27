@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import (
     CHAR,
+    DDL,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -23,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -295,6 +297,49 @@ class User(Base):
     # Member visit days (Guest-Identity-and-Visits 4.3): set by GET /auth/session once R04 exists.
     first_visit_on: Mapped[date | None] = mapped_column(Date)
     last_visit_on: Mapped[date | None] = mapped_column(Date)
+    # Account state (Moderation spec 4.2): a disabled account fails closed even with a valid token.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active", server_default="active")
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (CheckConstraint("status IN ('active', 'disabled')", name="ck_users_status"),)
+
+
+class UserRole(Base):
+    """Staff role grants (Moderation spec 2.2): at most one active role per user, enforced by the index."""
+
+    __tablename__ = "user_roles"
+    __table_args__ = (
+        CheckConstraint("role IN ('moderator', 'superadmin')", name="ck_user_roles_role"),
+        Index("uq_user_roles_one_active", "user_id", unique=True, postgresql_where=text("revoked_at IS NULL")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class RoleAdminGuard(Base):
+    """One row, locked ``FOR UPDATE`` to serialise superadmin grants and revocations (spec 6.1)."""
+
+    __tablename__ = "role_admin_guard"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_role_admin_guard_single_row"),)
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+
+
+class AuthSessionActivity(Base):
+    """Last request per Supabase session, for the superadmin inactivity limit (spec 4.1)."""
+
+    __tablename__ = "auth_session_activity"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class PlatformRole(Base):
@@ -553,18 +598,339 @@ class ModerationActionRecord(Base):
     reason_code: Mapped[str] = mapped_column(String(60), nullable=False)
     note: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # the queue task this decision closed
+    request_id: Mapped[str | None] = mapped_column(String(64))
 
 
 class OutboxEvent(Base):
     __tablename__ = "outbox_events"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    topic: Mapped[str] = mapped_column(String(100), nullable=False)
+    topic: Mapped[str] = mapped_column(String(100), nullable=False)  # the event type, e.g. review.state_changed
     aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Shared outbox contract (Moderation spec 6.7, migration 0014): status, lease, retries, errors.
+    schema_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, server_default="1")
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now())
+    last_error: Mapped[str | None] = mapped_column(String(300))
 
+
+class AuditEvent(Base):
+    """Append-only record of privileged actions (Moderation spec 6.6). Triggers refuse UPDATE and DELETE.
+
+    ``id`` is globally unique (the table is not partitioned), so ``GET /admin/audit-events/{id}`` is exact.
+    ``metadata`` holds approved, non-secret facts only.
+    """
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_occurred_at", "occurred_at"),
+        Index("ix_audit_events_target", "target_type", "target_id"),
+        Index("ix_audit_events_actor", "actor_user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # no FK: the log outlives accounts
+    actor_role_snapshot: Mapped[str | None] = mapped_column(String(20))
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    reason: Mapped[str | None] = mapped_column(String(500))
+    event_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+
+# Databases built from these models (tests) get the same append-only guard the migration installs.
+event.listen(
+    AuditEvent.__table__,
+    "after_create",
+    DDL(  # type: ignore[no-untyped-call]
+        "CREATE OR REPLACE FUNCTION audit_events_are_append_only() RETURNS trigger SET search_path = '' AS $$ "
+        "BEGIN RAISE EXCEPTION 'audit_events is append-only'; END; $$ LANGUAGE plpgsql"
+    ),
+)
+event.listen(
+    AuditEvent.__table__,
+    "after_create",
+    DDL(  # type: ignore[no-untyped-call]
+        "CREATE TRIGGER audit_events_no_change BEFORE UPDATE OR DELETE ON audit_events "
+        "FOR EACH ROW EXECUTE FUNCTION audit_events_are_append_only()"
+    ),
+)
+event.listen(
+    AuditEvent.__table__,
+    "after_create",
+    DDL(  # type: ignore[no-untyped-call]
+        "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events "
+        "FOR EACH STATEMENT EXECUTE FUNCTION audit_events_are_append_only()"
+    ),
+)
+
+
+class IdempotencyKey(Base):
+    """Stored result of a retried decision (Moderation spec 8.2), scoped by actor and operation."""
+
+    __tablename__ = "idempotency_keys"
+
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    operation: Mapped[str] = mapped_column(String(80), primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    status_code: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    response: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class ModerationTask(Base):
+    """Queue and claim state, kept apart from content lifecycle (Moderation spec 5 and 7.2)."""
+
+    __tablename__ = "moderation_tasks"
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'done', 'cancelled')", name="ck_moderation_tasks_status"),
+        CheckConstraint("required_role IN ('moderator', 'superadmin')", name="ck_moderation_tasks_role"),
+        CheckConstraint(
+            "task_type IN ('review_moderation', 'report', 'verification', 'appeal', 'enforcement')",
+            name="ck_moderation_tasks_type",
+        ),
+        Index(
+            "uq_moderation_tasks_open_subject",
+            "task_type",
+            "subject_id",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index("ix_moderation_tasks_queue", "status", "priority", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    task_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="open", server_default="open")
+    required_role: Mapped[str] = mapped_column(String(20), nullable=False, default="moderator", server_default="moderator")
+    escalated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    priority: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    claimed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Report(Base):
+    """A member's report on a review (Gantt R11). One open report per reporter and review."""
+
+    __tablename__ = "reports"
+    __table_args__ = (
+        CheckConstraint("state IN ('open', 'in_review', 'actioned', 'dismissed')", name="ck_reports_state"),
+        Index(
+            "uq_reports_one_open_per_reporter",
+            "reporter_user_id",
+            "review_id",
+            unique=True,
+            postgresql_where=text("state IN ('open', 'in_review')"),
+        ),
+        Index("ix_reports_review", "review_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"), nullable=False)
+    reporter_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    details: Mapped[str | None] = mapped_column(String(1000))
+    state: Mapped[str] = mapped_column(String(12), nullable=False, default="open", server_default="open")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_note: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+OPEN_CASE_STATES = "('submitted', 'in_review', 'needs_clarification', 'escalated')"
+
+
+class VerificationCase(Base):
+    """A member's request to become a Verified Member (Moderation spec 6.2, 7.1). One open case per member."""
+
+    __tablename__ = "verification_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('submitted', 'in_review', 'needs_clarification', 'approved', 'rejected', 'escalated', 'withdrawn')",
+            name="ck_verification_cases_state",
+        ),
+        Index("uq_verification_cases_one_open", "applicant_user_id", unique=True, postgresql_where=text(f"state IN {OPEN_CASE_STATES}")),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    applicant_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    statement: Mapped[str | None] = mapped_column(String(1000))
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="submitted", server_default="submitted")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_reason: Mapped[str | None] = mapped_column(String(60))
+    decision_note: Mapped[str | None] = mapped_column(String(500))
+    purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class VerificationEvidence(Base):
+    """Metadata of a private evidence file; the bytes live in a private Storage bucket (spec 3.3)."""
+
+    __tablename__ = "verification_evidence"
+    __table_args__ = (CheckConstraint("status IN ('pending', 'uploaded', 'deleted')", name="ck_verification_evidence_status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("verification_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    object_key: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    content_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending", server_default="pending")
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EnforcementCase(Base):
+    """A takedown or removal, kept apart from the content itself (spec 6.4). Rating eligibility is its own field."""
+
+    __tablename__ = "enforcement_cases"
+    __table_args__ = (
+        CheckConstraint("kind IN ('takedown', 'account')", name="ck_enforcement_cases_kind"),
+        CheckConstraint("state IN ('taken_down', 'removed', 'restored', 'open', 'closed')", name="ck_enforcement_cases_state"),
+        CheckConstraint("num_nonnulls(review_id, subject_user_id) = 1", name="ck_enforcement_cases_one_subject"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    review_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"))
+    subject_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    state: Mapped[str] = mapped_column(String(12), nullable=False)
+    emergency: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    counts_toward_rating: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    opened_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Sanction(Base):
+    """An account-level restriction with a scope and an end or review date (spec 6.4, 7.3)."""
+
+    __tablename__ = "sanctions"
+    __table_args__ = (
+        CheckConstraint("kind IN ('warning', 'posting_restriction', 'suspension')", name="ck_sanctions_kind"),
+        CheckConstraint("state IN ('active', 'expired', 'reversed')", name="ck_sanctions_state"),
+        CheckConstraint("ends_at IS NOT NULL OR review_on IS NOT NULL", name="ck_sanctions_has_end"),
+        Index("ix_sanctions_user_active", "user_id", postgresql_where=text("state = 'active'")),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    enforcement_case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("enforcement_cases.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    scope: Mapped[str] = mapped_column(String(60), nullable=False, default="reviews", server_default="reviews")
+    state: Mapped[str] = mapped_column(String(10), nullable=False, default="active", server_default="active")
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_on: Mapped[date | None] = mapped_column(Date)
+    reason_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Appeal(Base):
+    """An appeal against one decision (spec 6.5). Typed targets keep real foreign keys; exactly one is set."""
+
+    __tablename__ = "appeals"
+    __table_args__ = (
+        CheckConstraint("state IN ('received', 'in_review', 'upheld', 'overturned', 'withdrawn')", name="ck_appeals_state"),
+        CheckConstraint(
+            "num_nonnulls(moderation_action_id, enforcement_case_id, verification_case_id) = 1", name="ck_appeals_one_target"
+        ),
+        # one appeal per decision: a decided appeal cannot be filed again; a withdrawn one can
+        Index("uq_appeals_action", "moderation_action_id", unique=True, postgresql_where=text("moderation_action_id IS NOT NULL AND state <> 'withdrawn'")),
+        Index("uq_appeals_enforcement", "enforcement_case_id", unique=True, postgresql_where=text("enforcement_case_id IS NOT NULL AND state <> 'withdrawn'")),
+        Index("uq_appeals_verification", "verification_case_id", unique=True, postgresql_where=text("verification_case_id IS NOT NULL AND state <> 'withdrawn'")),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    appellant_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    moderation_action_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("moderation_actions.id", ondelete="CASCADE"))
+    enforcement_case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("enforcement_cases.id", ondelete="CASCADE"))
+    verification_case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("verification_cases.id", ondelete="CASCADE"))
+    state: Mapped[str] = mapped_column(String(12), nullable=False, default="received", server_default="received")
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    original_decider_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(String(500))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+
+class Notification(Base):
+    """One in-app notification for one person from one outbox event (spec 6.7, 11).
+
+    ``(event_id, recipient_user_id, kind)`` is unique, so re-processing an event never duplicates it.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("event_id", "recipient_user_id", "kind", name="uq_notifications_identity"),
+        CheckConstraint("email_status IN ('none', 'pending', 'sent', 'failed', 'ambiguous', 'digest')", name="ck_notifications_email_status"),
+        Index("ix_notifications_recipient_created", "recipient_user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outbox_events.id", ondelete="CASCADE"), nullable=False)
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(60), nullable=False)
+    critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    title_bn: Mapped[str] = mapped_column(String(160), nullable=False)
+    title_en: Mapped[str] = mapped_column(String(160), nullable=False)
+    body_bn: Mapped[str] = mapped_column(String(600), nullable=False)
+    body_en: Mapped[str] = mapped_column(String(600), nullable=False)
+    link: Mapped[str | None] = mapped_column(String(300))
+    appeal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # kept while that appeal is open (spec 10)
+    email_status: Mapped[str] = mapped_column(String(10), nullable=False, default="none", server_default="none")
+    email_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeliveryAttempt(Base):
+    """History of each email attempt; an accepted-then-crashed send is ``ambiguous``, never ``failed`` (spec 6.7)."""
+
+    __tablename__ = "delivery_attempts"
+    __table_args__ = (CheckConstraint("status IN ('sent', 'failed', 'ambiguous')", name="ck_delivery_attempts_status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String(10), nullable=False, default="email")
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(120))
+    error: Mapped[str | None] = mapped_column(String(300))
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class RateLimitBucket(Base):
@@ -605,3 +971,43 @@ class VisitDailyStats(Base):
     rolled_up_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now()
     )
+
+
+class ReviewMedia(Base):
+    """A photo or video attached to a member review (Review.md 8, amendment A4).
+
+    The upload lands in a private quarantine object; the server checks it (and re-encodes images
+    without metadata) into ``processed_key``. Only ``approved`` media of a published review are shown.
+    """
+
+    __tablename__ = "review_media"
+    __table_args__ = (
+        CheckConstraint("kind IN ('image', 'video')", name="ck_review_media_kind"),
+        CheckConstraint(
+            "state IN ('awaiting_upload', 'pending', 'approved', 'rejected', 'removed')", name="ck_review_media_state"
+        ),
+        CheckConstraint("ownership_declared", name="ck_review_media_ownership"),
+        CheckConstraint("state IN ('awaiting_upload', 'removed') OR processed_key IS NOT NULL", name="ck_review_media_processed"),
+        Index("ix_review_media_review", "review_id", "position"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"), nullable=False)
+    uploader_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="awaiting_upload", server_default="awaiting_upload")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    quarantine_key: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    processed_key: Mapped[str | None] = mapped_column(String(300), unique=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    alt_text: Mapped[str] = mapped_column(String(250), nullable=False)
+    caption: Mapped[str | None] = mapped_column(String(300))
+    ownership_declared: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now())
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

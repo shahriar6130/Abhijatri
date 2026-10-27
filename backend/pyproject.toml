@@ -7,11 +7,14 @@ dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
+  "pillow>=11",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
+  "pyjwt[crypto]>=2.10,<3",
   "redis>=8.1.0",
   "slowapi>=0.1.9,<1",
   "sqlalchemy>=2.0,<3",
+  "truststore>=0.10,<1",
   "tzdata>=2024.1",
   "uvicorn[standard]>=0.34,<1",
 ]
@@ -25,6 +28,7 @@ dev = [
   "pip-audit>=2.7,<3",
   "mypy>=1.13,<2",
   "fakeredis>=2.26,<3",
+  "pyotp>=2.9,<3",
 ]
 
 [tool.pytest.ini_options]

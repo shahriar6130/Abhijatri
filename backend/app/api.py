@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session
 
-from app import abuse, visits
+from app import abuse, media, visits
 from app import review_parameters as rp
 from app.abuse import CounterSessions
 from app.client_address import network_digest, trusted_client_address
@@ -68,6 +68,7 @@ from app.services import (
     verify_receipt,
     withdraw_review,
 )
+from app.storage import StorageClient, get_storage
 from app.turnstile import ACTION_GUEST_REVIEW, TurnstileDep
 
 logger = logging.getLogger(__name__)
@@ -382,6 +383,7 @@ def public_reviews(
     after: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage),
 ) -> ReviewFeed:
     statement = (
         select(Review, ReviewRevision)
@@ -406,6 +408,9 @@ def public_reviews(
     has_more = len(rows) > limit
     rows = rows[:limit]
     categories = revision_category_ratings(session, [revision.id for _, revision in rows])
+    attached = media.published_media(session, storage, [review.id for review, _ in rows])
+    author_ids = {review.author_user_id for review, _ in rows if review.author_user_id}
+    authors = dict(session.execute(select(User.id, User.display_name).where(User.id.in_(author_ids))).all()) if author_ids else {}
     items = [
         PublicReview(
             id=review.id,
@@ -417,6 +422,8 @@ def public_reviews(
             title=revision.title,
             body=revision.body,
             category_ratings=categories[revision.id],
+            author_display_name=authors.get(review.author_user_id) if review.author_user_id else None,
+            media=attached.get(review.id, []),
         )
         for review, revision in rows
         if review.published_at is not None

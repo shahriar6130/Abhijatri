@@ -186,6 +186,52 @@ def guest_visit_checks(settings: Settings, network: bytes) -> list[tuple[Rule, b
     ]
 
 
+AUTH_LABEL = "abhijatri:auth-identifier:v1"
+
+
+def email_key(email: str) -> bytes:
+    """Keyed digest of an email address for throttling; the address itself is never stored."""
+    return crypto.digest(AUTH_LABEL, crypto.current_key_id(), email)
+
+
+def register_checks(settings: Settings, network: bytes) -> list[tuple[Rule, bytes]]:
+    return [(Rule("auth_register:network:1h", HOUR, settings.register_per_network_per_hour), network)]
+
+
+def token_confirm_checks(settings: Settings, network: bytes) -> list[tuple[Rule, bytes]]:
+    return [(Rule("auth_token:network:1h", HOUR, settings.token_confirms_per_network_per_hour), network)]
+
+
+def reset_request_checks(settings: Settings, email: bytes, network: bytes) -> list[tuple[Rule, bytes]]:
+    return [
+        (Rule("auth_reset:email:1h", HOUR, settings.reset_requests_per_email_per_hour), email),
+        (Rule("auth_reset:network:1h", HOUR, settings.reset_requests_per_network_per_hour), network),
+    ]
+
+
+def login_failure_rules(settings: Settings) -> list[tuple[Rule, str]]:
+    """(rule, which key it applies to): progressive refusal after repeated failures."""
+    return [
+        (Rule("auth_login_fail:email:15m", QUARTER_HOUR, settings.login_failures_per_email_per_15m), "email"),
+        (Rule("auth_login_fail:network:1h", HOUR, settings.login_attempts_per_network_per_hour), "network"),
+    ]
+
+
+def guard_login(sessions: SessionFactory, email: bytes, network: bytes) -> None:
+    waits = [
+        wait
+        for rule, which in login_failure_rules(get_settings())
+        if (wait := peek(sessions, rule, email if which == "email" else network)) is not None
+    ]
+    if waits:
+        raise ApiError("RATE_LIMITED", headers={"Retry-After": str(max(waits))})
+
+
+def record_login_failure(sessions: SessionFactory, email: bytes, network: bytes) -> None:
+    for rule, which in login_failure_rules(get_settings()):
+        hit(sessions, rule, email if which == "email" else network)
+
+
 def receipt_failure_rules(settings: Settings) -> list[Rule]:
     return [
         Rule("receipt_fail:15m", QUARTER_HOUR, settings.receipt_failures_short_limit),

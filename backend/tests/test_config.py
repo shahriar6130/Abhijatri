@@ -63,6 +63,7 @@ def test_production_accepts_valid_configuration() -> None:
         {"redis_url": None},
         {"redis_url": "redis://default:pw@apn1-example.upstash.io:6379"},  # TLS is required
         {"ops_dashboard_token": "too-short"},
+        {"auth_skip_email_verification": True},  # every production account proves its email
     ],
 )
 def test_production_fails_closed(overrides: dict) -> None:

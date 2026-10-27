@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 ACTION_GUEST_REVIEW = "guest-review"
 ACTION_GUEST_REPORT = "guest-report"
 ACTION_GUEST_REMOVAL = "guest-removal"
+ACTION_AUTH_REGISTER = "auth-register"
+ACTION_AUTH_RESET = "auth-reset"
 
 
 class Verifier(Protocol):

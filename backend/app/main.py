@@ -8,12 +8,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.admin.routes import member_router as reports_router
+from app.admin.routes import router as admin_router
 from app.api import router
+from app.auth.routes import router as auth_router
 from app.config import get_settings
+from app.db import SessionLocal
 from app.destination_api import router as destination_router
 from app.errors import ApiError, error_response, install_error_handlers
 from app.guest_tag import DISPLAY_PATTERN
 from app.limits import limiter
+from app.member_routes import router as member_router
+from app.notify.worker import NotificationWorker
 from app.ops import events
 from app.ops.routes import router as ops_router
 
@@ -65,9 +71,12 @@ def _count_response(request: Request, status_code: int) -> None:
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     flusher = events.Flusher()
     flusher.start()
+    worker = NotificationWorker(SessionLocal)  # outbox relay and email sender (Moderation spec 6.7)
+    worker.start()
     try:
         yield
     finally:
+        worker.stop()
         flusher.stop()
 
 
@@ -149,13 +158,17 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PUT", "PATCH"],
-        allow_headers=["Content-Type", "Idempotency-Key", "Authorization"],
-        allow_credentials=False,
+        allow_headers=["Content-Type", "Idempotency-Key", "Authorization", "X-CSRF-Token"],
+        allow_credentials=True,  # cookie sessions (R04); origins stay an explicit list, never "*"
         max_age=600,
     )
     application.include_router(router)
     application.include_router(destination_router)
     application.include_router(ops_router)
+    application.include_router(auth_router)
+    application.include_router(admin_router)
+    application.include_router(reports_router)
+    application.include_router(member_router)
     return application
 
 

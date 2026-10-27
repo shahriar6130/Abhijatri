@@ -164,8 +164,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             {t('সাইন ইন', 'Sign in')}
           </Link>
           )}
-          {/* A named guest can sign out; an anonymous guest has nothing to sign out of. */}
-          {session.kind === 'guest' && session.displayName && (
+          {session.kind === 'member' && (
+            <div className="flex flex-col gap-1 text-xs">
+              <Link to="/account/verification" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {isVerifiedMember ? t('যাচাইকৃত সদস্য ✓', 'Verified Member ✓') : t('যাচাইকৃত সদস্য হোন', 'Become a Verified Member')}
+              </Link>
+              <Link to="/account/appeals" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('আপিল', 'Appeals')}
+              </Link>
+            </div>
+          )}
+          {/* A member or a named guest can sign out; an anonymous guest has nothing to sign out of. */}
+          {(session.kind === 'member' || session.displayName) && (
           <button
             type="button"
             onClick={handleSignOut}

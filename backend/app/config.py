@@ -92,6 +92,60 @@ class Settings(BaseSettings):
     ops_dashboard_token: str | None = Field(default=None, repr=False)
     ops_auth_failures_per_network_per_hour: int = Field(default=10, ge=1)
 
+    # Identity (R04). Supabase Auth is the identity provider; the browser only ever talks to this
+    # API, which proxies Auth and keeps the tokens in HttpOnly cookies (Decisions.md, 27 Oct 2026).
+    supabase_url: str | None = None  # e.g. http://127.0.0.1:54321 locally
+    supabase_anon_key: str | None = Field(default=None, repr=False)
+    supabase_service_role_key: str | None = Field(default=None, repr=False)  # server side only
+    supabase_jwt_secret: str | None = Field(default=None, repr=False)  # HS256 tokens
+    supabase_jwks_url: str | None = None  # ES256/RS256 tokens
+    supabase_timeout_seconds: float = Field(default=8.0, gt=0, le=30)
+    frontend_base_url: str = "http://localhost:5173"
+    session_cookie_name: str = "__Host-abhijatri_session"
+    refresh_cookie_name: str = "__Host-abhijatri_refresh"
+    cookie_secure: bool = True  # __Host- cookies require Secure; browsers allow it on localhost
+    member_session_days: int = Field(default=30, ge=1, le=90)  # absolute refresh-cookie lifetime
+    superadmin_inactivity_hours: int = Field(default=8, ge=1, le=72)
+    reauth_window_minutes: int = Field(default=10, ge=1, le=60)
+    require_mfa_for_moderators: bool = True
+    # Durable auth limits (API.md section 7, PF 14.3).
+    login_failures_per_email_per_15m: int = Field(default=5, ge=1)
+    login_attempts_per_network_per_hour: int = Field(default=100, ge=1)
+    register_per_network_per_hour: int = Field(default=10, ge=1)
+    reset_requests_per_email_per_hour: int = Field(default=3, ge=1)
+    reset_requests_per_network_per_hour: int = Field(default=30, ge=1)
+    token_confirms_per_network_per_hour: int = Field(default=30, ge=1)
+
+    # Notifications (Moderation spec 11). `mailpit` is the local inbox, `resend` production, `none` off.
+    email_provider: str = Field(default="none", pattern="^(none|mailpit|resend|smtp|brevo)$")
+    brevo_api_key: str | None = Field(default=None, repr=False)
+    # Who sends the verification and password-reset emails:
+    # - "supabase": Supabase Auth mails them itself (its own rate limits apply);
+    # - "app": the API asks Auth for the one-time token without any email, then sends it through
+    #   EMAIL_PROVIDER. Only this API's own limits apply (API.md section 7).
+    auth_email_delivery: str = Field(default="supabase", pattern="^(supabase|app)$")
+    # Development only: registration creates an already-confirmed account and sends no email, so sign-in
+    # works before an email provider is set up. Refused in production.
+    auth_skip_email_verification: bool = False
+    smtp_host: str | None = None  # e.g. smtp.gmail.com
+    smtp_port: int = Field(default=587, ge=1, le=65535)  # 587 STARTTLS, 465 TLS
+    smtp_username: str | None = None
+    smtp_password: str | None = Field(default=None, repr=False)  # Gmail: an app password, never the account password
+    mailpit_url: str = "http://127.0.0.1:54324"
+    resend_api_key: str | None = Field(default=None, repr=False)
+    email_from: str = "Abhijatri <no-reply@abhijatri.test>"
+    notify_worker_enabled: bool = True
+    notify_poll_seconds: float = Field(default=2.0, gt=0, le=60)
+    digest_hour: int = Field(default=8, ge=0, le=23)  # local hour of the daily digest
+
+    @property
+    def email_from_address(self) -> str:
+        return self.email_from.split("<")[-1].rstrip(">").strip()
+
+    @property
+    def email_from_name(self) -> str:
+        return self.email_from.split("<")[0].strip() or "Abhijatri"
+
     @field_validator("database_url", "migration_database_url")
     @classmethod
     def _normalize_url(cls, value: str | None) -> str | None:
@@ -142,6 +196,14 @@ class Settings(BaseSettings):
             ring = json.loads(self.receipt_keys)
             return {str(key_id): str(secret) for key_id, secret in ring.items()}
         return {"v1": self.receipt_pepper}
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(
+            self.supabase_url
+            and self.supabase_anon_key
+            and (self.supabase_jwt_secret or self.supabase_jwks_url)
+        )
 
     @property
     def display_tz(self) -> ZoneInfo:
@@ -196,6 +258,22 @@ class Settings(BaseSettings):
             raise ValueError("REDIS_URL must be set to this environment's rediss:// (TLS) Upstash URL")
         if self.ops_dashboard_token is not None and len(self.ops_dashboard_token) < 32:
             raise ValueError("OPS_DASHBOARD_TOKEN must be at least 32 characters, or unset")
+        if self.supabase_url and not self.supabase_url.startswith("https://"):
+            raise ValueError("SUPABASE_URL must be https:// in production")
+        if self.email_provider == "mailpit":
+            raise ValueError("EMAIL_PROVIDER=mailpit is a development inbox; use resend in production")
+        if self.email_provider == "smtp" and not (self.smtp_host and self.smtp_username and self.smtp_password):
+            raise ValueError("SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD are required when EMAIL_PROVIDER=smtp")
+        if self.email_provider == "brevo" and not self.brevo_api_key:
+            raise ValueError("BREVO_API_KEY is required when EMAIL_PROVIDER=brevo")
+        if self.auth_skip_email_verification:
+            raise ValueError("AUTH_SKIP_EMAIL_VERIFICATION is for development only; email must be verified in production")
+        if self.auth_email_delivery == "app" and self.email_provider == "none":
+            raise ValueError("AUTH_EMAIL_DELIVERY=app needs an EMAIL_PROVIDER that sends mail")
+        if self.email_provider == "resend" and not self.resend_api_key:
+            raise ValueError("RESEND_API_KEY is required when EMAIL_PROVIDER=resend")
+        if self.supabase_url and not self.cookie_secure:
+            raise ValueError("COOKIE_SECURE must stay true in production")
         return self
 
 

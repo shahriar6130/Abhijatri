@@ -26,13 +26,12 @@ class StrictRequestModel(BaseModel):
 CategoryScore = Annotated[int, Field(ge=rp.RATING_MIN, le=rp.RATING_MAX)]
 
 
-class GuestReviewCreate(StrictRequestModel):
+class ReviewContent(StrictRequestModel):
+    """What every review carries, from a guest or a signed-in member (Review.md 3.1)."""
+
     destination_id: uuid.UUID
     client_draft_id: uuid.UUID
-    guest_scope_secret: str = Field(min_length=43, max_length=200, repr=False)
     receipt_secret: str = Field(min_length=1, max_length=100, repr=False)
-    turnstile_token: str | None = Field(default=None, max_length=2048, repr=False)
-    guest_display_name: str = Field(min_length=1, max_length=rp.DISPLAY_NAME_MAX)
     language: ReviewLanguage
     traveller_type: TravellerType
     comfort_tier: ComfortTier
@@ -62,6 +61,16 @@ class GuestReviewCreate(StrictRequestModel):
         if value > current_month:
             raise ValueError(f"visit_month cannot be in the future in {display_tz.key}")
         return value
+
+
+class GuestReviewCreate(ReviewContent):
+    guest_scope_secret: str = Field(min_length=43, max_length=200, repr=False)
+    turnstile_token: str | None = Field(default=None, max_length=2048, repr=False)
+    guest_display_name: str = Field(min_length=1, max_length=rp.DISPLAY_NAME_MAX)
+
+
+class MemberReviewCreate(ReviewContent):
+    """A signed-in member's review: the author and public name come from the session (Review.md 3.3)."""
 
 
 class GuestReviewCreated(BaseModel):
@@ -139,6 +148,53 @@ class PublicReview(BaseModel):
     title: str
     body: str
     category_ratings: dict[ReviewCategory, int] = Field(default_factory=dict)
+    # A member's public display name; null for guests (who stay anonymous).
+    author_display_name: str | None = None
+    media: list["PublicMedia"] = Field(default_factory=list)
+
+
+class PublicMedia(BaseModel):
+    """An approved photo or video. `url` is a signed link that works for about an hour."""
+
+    id: uuid.UUID
+    kind: Literal["image", "video"]
+    content_type: str
+    url: str
+    alt_text: str
+    caption: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
+
+
+PublicReview.model_rebuild()
+
+
+class MediaIntentRequest(StrictRequestModel):
+    content_type: str = Field(max_length=40)
+    size_bytes: int = Field(ge=1)
+    alt_text: str = Field(min_length=1, max_length=250)
+    caption: str | None = Field(default=None, max_length=300)
+    # The uploader confirms they made the photo or video and may publish it (Review.md 8).
+    ownership_declared: Literal[True]
+
+
+class MediaIntent(BaseModel):
+    media_id: uuid.UUID
+    kind: Literal["image", "video"]
+    upload_url: str
+    max_bytes: int
+
+
+class MediaStatus(BaseModel):
+    id: uuid.UUID
+    kind: Literal["image", "video"]
+    state: str
+    content_type: str
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
+    size_bytes: int | None = None
 
 
 class CategoryAverage(BaseModel):

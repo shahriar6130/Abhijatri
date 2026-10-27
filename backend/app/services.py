@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import crypto
+from app.admin.tasks import cancel_open_tasks, ensure_task
 from app.guest_tag import stored_guest_tag
 from app.models import (
     Destination,
@@ -33,7 +34,7 @@ from app.models import (
     User,
     Verification,
 )
-from app.schemas import CategoryAverage, GuestReviewCreate
+from app.schemas import CategoryAverage, GuestReviewCreate, MemberReviewCreate, ReviewContent
 
 
 class ReviewError(Exception):
@@ -204,6 +205,12 @@ def submit_guest_review(session: Session, payload: GuestReviewCreate) -> GuestSu
             ) from None
         return _recover_duplicate(session, existing, payload.receipt_secret)
 
+    _add_content(session, review, payload)
+    return GuestSubmissionResult(review=review, duplicate_recovered=False)
+
+
+def _add_content(session: Session, review: Review, payload: ReviewContent) -> None:
+    """First revision, category ratings, stats row, outbox event and the moderation task."""
     revision = ReviewRevision(
         review_id=review.id,
         sequence=1,
@@ -234,6 +241,57 @@ def submit_guest_review(session: Session, payload: GuestReviewCreate) -> GuestSu
             payload={"review_id": str(review.id), "destination_id": str(review.destination_id)},
         )
     )
+    ensure_task(session, "review_moderation", review.id)  # the review appears in the moderators' queue
+
+
+def _published_destination(session: Session, destination_id: uuid.UUID) -> Destination:
+    destination = session.scalar(
+        select(Destination).where(Destination.id == destination_id, Destination.status == DestinationStatus.PUBLISHED)
+    )
+    if destination is None:
+        raise ReviewNotFound("published destination not found")
+    return destination
+
+
+def submit_member_review(session: Session, payload: MemberReviewCreate, author_id: uuid.UUID) -> GuestSubmissionResult:
+    """A signed-in member's review (Review.md 3.3). The same draft id and receipt make a retry safe;
+    one active review per member, destination and visit month (``uq_reviews_member_active_visit``)."""
+    require_receipt_format(payload.receipt_secret)
+    _published_destination(session, payload.destination_id)
+
+    def existing_draft() -> Review | None:
+        return session.scalar(
+            select(Review).where(Review.author_user_id == author_id, Review.client_draft_id == payload.client_draft_id)
+        )
+
+    existing = existing_draft()
+    if existing is not None:
+        return _recover_duplicate(session, existing, payload.receipt_secret)
+    key_id = crypto.current_key_id()
+    receipt_digest = crypto.digest(crypto.RECEIPT_LABEL, key_id, payload.receipt_secret)
+    if session.scalar(select(ReviewReceipt.id).where(ReviewReceipt.key_id == key_id, ReviewReceipt.digest == receipt_digest)):
+        raise ReviewConflict("receipt already bound to another review", "DRAFT_ALREADY_SUBMITTED")
+    review = Review(
+        destination_id=payload.destination_id,
+        author_user_id=author_id,
+        client_draft_id=payload.client_draft_id,
+        status=ReviewStatus.PENDING,
+        rating_eligibility=RatingEligibility.NOT_EVALUATED,
+        overall_rating=payload.overall_rating,
+        visit_month=payload.visit_month,
+    )
+    try:
+        with session.begin_nested():
+            session.add(review)
+            session.flush()
+            session.add(ReviewReceipt(review_id=review.id, key_id=key_id, digest=receipt_digest))
+            session.flush()
+    except IntegrityError:
+        existing = existing_draft()
+        if existing is not None:  # a simultaneous retry of the same draft
+            return _recover_duplicate(session, existing, payload.receipt_secret)
+        raise ReviewConflict("member already reviewed this destination for that month", "MEMBER_REVIEW_EXISTS") from None
+    _add_content(session, review, payload)
     return GuestSubmissionResult(review=review, duplicate_recovered=False)
 
 
@@ -471,6 +529,8 @@ def moderate_review(
     decision: ModerationDecision,
     reason_code: str,
     note: str | None,
+    task_id: uuid.UUID | None = None,
+    request_id: str | None = None,
 ) -> Review:
     review = _lock_review(session, review_id)
     if review.version != expected_version:
@@ -529,6 +589,8 @@ def moderate_review(
             new_status=review.status,
             reason_code=reason_code,
             note=note,
+            task_id=task_id,
+            request_id=request_id,
         )
     )
     session.add(
@@ -628,6 +690,7 @@ def withdraw_review(session: Session, review_id: uuid.UUID, expected_version: in
             payload={"review_id": str(review.id), "destination_id": str(review.destination_id)},
         )
     )
+    cancel_open_tasks(session, review.id)  # a withdrawn review leaves the queue
     return review
 
 

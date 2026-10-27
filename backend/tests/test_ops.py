@@ -327,7 +327,7 @@ def test_the_ops_origin_passes_the_preflight_with_the_authorization_header(
         assert preflight.status_code == 200
         assert preflight.headers["access-control-allow-origin"] == ops_origin
         assert "authorization" in preflight.headers["access-control-allow-headers"].lower()
-        assert "access-control-allow-credentials" not in preflight.headers
+        assert preflight.headers["access-control-allow-credentials"] == "true"  # cookie sessions (R04)
 
         stranger = client.options(
             "/api/v1/ops/overview",

@@ -7,6 +7,8 @@ import type { CategoryAverage, PublicReview } from '../../types';
 import { formatNumber, formatTimestamp } from '../../utils/format';
 import { describeError, EmptyState, ErrorState, LoadingState } from '../common/StatusViews';
 import { CategoryAverages, CategoryChips } from '../destination/CategoryAverages';
+import { ReportReview } from './ReportReview';
+import { ReviewMediaGallery } from './ReviewMediaGallery';
 
 const PAGE_SIZE = 10;
 
@@ -118,7 +120,7 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
                 </span>
                 {/* A guest's name is never shown: "Anonymous guest · TAG" (owner, 22 Oct 2026). */}
                 <span className="font-semibold text-on-surface dark:text-on-dark">
-                  {review.author_type === 'GUEST' ? t('বেনামী অতিথি', 'Anonymous guest') : t('সদস্য', 'Member')}
+                  {review.author_type === 'GUEST' ? t('বেনামী অতিথি', 'Anonymous guest') : review.author_display_name || t('সদস্য', 'Member')}
                   {review.author_type === 'GUEST' && review.guest_tag && (
                     <>
                       {' · '}
@@ -131,7 +133,9 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
               {/* Plain text only: React escapes it, and user HTML is never rendered (Review.md 10). */}
               <h3 className="text-base font-bold font-title text-on-surface dark:text-on-dark">{review.title}</h3>
               <p className="text-sm font-body leading-relaxed text-on-surface dark:text-on-dark whitespace-pre-line">{review.body}</p>
+              <ReviewMediaGallery media={review.media} />
               <CategoryChips ratings={review.category_ratings} />
+              <ReportReview reviewId={review.id} />
             </li>
           ))}
         </ul>
