@@ -702,3 +702,111 @@ Still open, owner actions:
 - **F-01:** rotate the Supabase password, update Railway `DATABASE_URL`, and remove the audit PDF from `backend-dev` history.
 - **F-04 remainder:** the Tailwind 4 migration.
 - **F-08:** the `ruff format` team decision.
+
+
+### 5.13 Verification, ops dashboard completion and deployment (27 October 2026)
+
+**Scope.** A full check of `Guest-Identity-and-Visits.md` and `System-Monitoring-Dashboard.md` against the code, the gaps closed, the local and live setup checked, and the dashboard deployed. Nothing was committed or pushed by the assistant; the owner pushes git.
+
+**Audit result.** Both documents match the code. Static audits (backend, frontend, ops app) found no missing feature; they found the gaps below, all closed.
+
+**Fixes in code**
+- **Tests ignored the developer's `.env`.** `.env` enabled the staff test header and set the ops token, so 6 tests failed on a developer machine. `tests/conftest.py` now disables `.env`, defaults `APP_ENV` to `development`, and points the app's own engine at `TEST_DATABASE_URL` when it is set, so tests never touch the dev database.
+- **Unhandled errors were not counted as 5xx.** `app/main.py`: the counting middleware now counts a raised exception as a 500 (and `route_5xx:<template>`), then re-raises. Before, the Traffic panel would have missed real failures.
+- **`reviews.submitted` was allowlisted but never counted.** `app/api.py` now counts it after a guest review commits.
+- **Stale comment** about Redis being deferred in `app/config.py` replaced.
+- **Frontend:** the guest review form notice now says the review is shown as "Anonymous guest" and that reviews from one browser share a guest tag (EN and BN); `recordDailyVisit` shares one in-flight request, so React StrictMode or two tabs send one visit.
+- **Ops app:** panel layout now comes from `GET /ops/panels` (`getCatalogue`, `orderByCatalogue`); table headers are bilingual.
+- **CI:** the public-build check fails if `frontend/dist` is empty and also looks for `abhijatri-ops`.
+
+**Tests added (all green)**
+- Backend: 5xx by route template, 60/minute limit, `no-store` on 200/401/404/429, CORS preflight with the `Authorization` header (ops origin allowed, others not), real counts in the content and traffic panels, health panel without secrets, log redaction filter (`test_log_redaction.py`), `reviews.submitted` counted.
+- Frontend: overlapping visit calls send one request; the review payload never sends a guest tag.
+- Ops app: API client (header only, `sessionStorage` only, error mapping), block rendering in both languages, catalogue ordering.
+
+**Results.** Backend 341 passed, 0 skipped (with `TEST_DATABASE_URL` set to the local `abhijatri_test` database on port 5434); ruff and mypy clean. Frontend 40 tests and build pass. Ops app 19 tests and build pass.
+
+**Local environment.** Postgres and Redis run from `compose.yaml` (`POSTGRES_PORT=5434`). Supabase is used only in production. The development database is at migration `0009_guest_tag_visit_stats`. All six panels returned `ok` on the local API.
+
+**Deployment state (27 October 2026)**
+- **Railway** (`sincere-warmth`, service `abhijatri-api`, production): deploy `a337d5c` on `main` is live at `https://abhijatri-backend.up.railway.app`. It has `OPS_DASHBOARD_TOKEN`, `REDIS_URL` and `CORS_ALLOWED_ORIGINS`. The ops routes answer `401` without a token, and the CORS preflight accepts `https://abhijatri-ops-44afee.vercel.app`. **This deploy predates the fixes above; they go live when `backend-dev` is merged to `main`.**
+- **Vercel** (account `syedmuhtasimapon-8894`, project `abhijatri-ops-44afee`, root `ops/`): `VITE_API_BASE_URL` set for Production to the Railway address, and `ops/` redeployed to production. The served bundle contains the Railway address and no localhost fallback; the response carries `X-Robots-Tag: noindex, nofollow, noarchive` and the strict CSP. The Vercel MCP connector was first signed in as a different account and was re-authorized as `syedmuhtasimapon-8894`.
+- The full test steps are in `Docs/System-Monitoring-Dashboard.md` section 12.
+
+**Open items (owner actions)**
+- Merge `backend-dev` to `main` so Railway redeploys the fixes.
+- Add the public frontend's Vercel origin to Railway `CORS_ALLOWED_ORIGINS` once it is known.
+- Add GitHub secrets `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` for the nightly roll-up workflow.
+- Check the live dashboard with the production token (the assistant never reads or prints it).
+- Still open from earlier: `visit_daily_stats` counters are nullable everywhere although only legacy days may be `NULL`; no frontend component tests; member visits wait for R04.
+Step 3: GitHub secrets for the nightly roll-up
+
+  1. Open the repo on GitHub: https://github.com/shahriar6130/Abhijatri. You
+     need admin or owner rights to add secrets. If the repo belongs to your
+     teammate, ask them to do this.
+  2. Go to Settings → Secrets and variables → Actions → New repository secret.
+  3. Add the first secret: Name OPS_API_URL, Secret
+     https://abhijatri-backend.up.railway.app (no trailing slash needed). Click
+     Add secret.
+  4. Add the second secret: Name OPS_DASHBOARD_TOKEN, Secret the same ops token
+     that is set on Railway. The Railway and local tokens may differ. Don't
+     paste the token into chat or commit it.
+  5. Test it: go to Actions → Nightly visit roll-up → Run workflow, pick the
+     branch, and run. A green run with "rolled_up" in the log means it works. A
+     green run that prints "secrets are not set; skipping" means a secret name
+     is wrong, so check the spelling.
+  6. After that it runs by itself at 00:15 Dhaka.
+**Update, 27 October 2026 (later): live Redis fixed.** The Upstash password saved in Railway `REDIS_URL` was rejected ("invalid username-password pair"), so the Health panel showed Redis down and Visitors and Traffic were degraded. The Upstash MCP server was added (`claude mcp add --scope user upstash https://mcp.upstash.com/mcp`, authorized in `/mcp`), the correct `rediss://` URL for the database `Abhijatri` (`first-monarch-177806.upstash.io`, ap-southeast-1) was tested with a PING, and `REDIS_URL` was set on Railway. After the redeploy (deploy `cd66c42d`, commit `a337d5c`, SUCCESS) all six panels returned `ok`, Redis `up` at 1.9 ms, and the counter flush is running. Visit counters start at 0 on the live site. Two things to remember: the dashboard must be opened at the fixed address `https://abhijatri-ops-44afee.vercel.app` (per-deployment Vercel addresses are not in `CORS_ALLOWED_ORIGINS`), and it needs Railway's `OPS_DASHBOARD_TOKEN`, which differs from the one in `backend/.env`.
+
+
+### 5.14 Accounts (R04), staff roles and the moderation API (27 October 2026)
+
+Full decisions are in `Docs/Decisions.md` (27 Oct 2026). Supabase Auth is the identity provider, run locally with the Supabase CLI; the API proxies it and keeps the tokens in HttpOnly cookies.
+
+**Built and tested**
+- **Member accounts (R04, R05):** `/api/v1/auth/*`: register, verify email, resend, sign in, sign out, password reset, `csrf`, `session` (also counts the member's visit day), TOTP enrol and verify, `reauth`. Same answers for known and unknown addresses; durable throttles for sign-in failures, sign-up, resets and link confirmations; reserved and look-alike display names refused. Code: `backend/app/auth/*`. Public pages: `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password`; `SessionContext` is server-backed; members can report a review.
+- **Roles:** `user_roles`, guard row, last-superadmin protection, `python -m app.jobs.bootstrap_admin`. Migration `0010_auth_roles`.
+- **Moderation foundation:** append-only `audit_events`, `idempotency_keys` (`0011_audit_idempotency`); `moderation_tasks` with claim leases, `reports`, task and request ids on `moderation_actions` (`0012_tasks_reports`).
+- **Staff API `/api/v1/admin/*`:** queue, claim, heartbeat, release, escalate; decisions with version, lease, idempotency key and an atomic audit and outbox row; bulk decisions with per-item results; reports and their transitions; audit listing and lookup; staff list, user search and role changes (password re-confirmation); monitoring summary. Code: `backend/app/admin/*`.
+- **Staff dashboard:** new `staff/` app (port 5175): sign-in with TOTP enrolment (QR and secret), queue with live lease countdown and heartbeat, review and report decisions, escalation, audit viewer, staff roles with a re-confirmation dialog, monitoring tiles, English and Bangla.
+- **Tests:** backend 410 passing against real PostgreSQL (including simultaneous-claim and last-superadmin races, append-only audit, idempotency replay, stale tab after escalation); frontend 55, staff 22, ops 19. `backend/scripts/e2e_smoke.py` runs about 35 steps against the real local Supabase stack, including real TOTP. The UI was also driven in Chrome: sign-up, verification, sign-in, session survival, sign-out, report, claim, publish, hide, role grant, TOTP enrolment and the QR code.
+- **Bugs the tests found and fixed:** a refreshed access token was not used for the follow-up Auth call; the role guard row was missing in a database built from the models, so the race protection did nothing there; the staff app fetched a CSRF token before sign-in; the enrolment QR was not drawable until re-encoded.
+
+**Not built yet (specification phases 3 to 5)**
+- Verification cases and evidence storage (a private bucket with short-lived signed URLs), enforcement cases and sanctions, appeals with their independence rule.
+- The notification outbox worker, the Resend adapter, daily digests and retention jobs.
+- A `moderation` panel on the monitoring dashboard; staff screens for the items above.
+- Production sign-in needs the owned same-site domain (PF 5.5).
+
+### 5.15 Verification, enforcement, appeals, notifications and retention (27 October 2026)
+
+**Built and tested** (specification phases 3 to 5):
+- **Verification cases** (`app/admin/cases.py`, migration `0013`): request, private evidence upload via signed URL to the Storage bucket `verification-evidence`, staff transitions with the table of spec 7.1, escalation to a superadmin, clarification round trip, approval writes `verifications` (`VERIFIED_MEMBER`, `APPROVED`) and the session reports `verified_member`.
+- **Enforcement and sanctions:** review takedowns (emergency path with a 24-hour superadmin follow-up task), removal and restore with a separate `counts_toward_rating`, account cases, warnings, posting restrictions and suspensions (a suspension disables the account), reversal and automatic expiry.
+- **Appeals:** standing check, 30-day deadline in Dhaka time, one appeal per decision, independent reviewer, overturn effects for each target type, original decisions preserved.
+- **Notifications** (`app/notify/*`, migration `0014`): the shared outbox gained status, lease, retries and errors; an in-process relay (`FOR UPDATE SKIP LOCKED`) fans events out into unique notifications; critical notices emailed at once (Mailpit locally, Resend in production), others in a daily digest; `ambiguous` sends are never resent blindly; live delivery to the browser over Server-Sent Events.
+- **Retention** (`python -m app.jobs.retention`): evidence and rejected cases, notifications (90 days, critical 24 months), sanction expiry; open appeals are re-checked under a lock before anything is deleted.
+- **Screens:** public app notification bell (live), `/account/verification`, `/account/appeals`, Verified Member badge; staff app queue views and forms for verification, appeals and emergency follow-ups, an Enforcement tab, and new monitoring tiles.
+- **Tests:** backend 427 passing on real PostgreSQL; `scripts/e2e_cases.py` against the real local stack (live notification measured at 2.5 s, approval email received, evidence round trip through Storage, independent-reviewer refusal).
+
+**Still open**
+- ~~Member review submission itself is Gantt R07 (not built)~~ Built 27 Oct 2026, see 5.16.
+- Provider webhooks (bounces, complaints) and their de-duplication: Resend webhooks are not wired yet.
+- Production: hosted Supabase Auth settings, `RESEND_API_KEY` and a verified sending domain, the same-site domain for cookies, and migrations `0010` to `0014` on the production database.
+
+### 5.16 Member reviews with photos and video (27 October 2026)
+
+Owner decisions: any signed-in member may attach media (not only Verified Members); video per Review.md A4 **without transcoding**. API in API.md 5.20; decisions in Decisions.md.
+
+**Built and tested**
+- `POST /reviews/member` (`app/services.py::submit_member_review`): the review is owned by the account (`author_user_id`), uses the same draft id and receipt recovery as guests, needs the session and CSRF token instead of Turnstile, and allows one active review per member, destination and visit month (`409 MEMBER_REVIEW_EXISTS`).
+- Media (`app/media.py`, migration `0016_review_media`, private bucket `review-media`): upload intent → browser PUT to a signed URL → `complete`, where the server reads the real file. Photos: JPEG/PNG/WebP only, at most 8 MiB and 20 megapixels, re-encoded to WebP without EXIF/GPS (Pillow). Video: MP4 with H.264 + AAC, at most 50 MiB and 60 s; metadata boxes and extra tracks are blanked in place. Bad files are deleted at once with a field code (`BROKEN`, `TYPE`, `TOO_LARGE`, `TOO_MANY_PIXELS`, `TOO_LONG`, `VIDEO_CODEC`, `NOT_UPLOADED`).
+- Moderation: the queue shows pending media; `rejected_media_ids` on a PUBLISH decision rejects single items; REJECT rejects all; states and the audit record commit with the decision. Staff preview through five-minute links.
+- Public feed: `author_display_name` for member reviews and approved `media` with one-hour signed links. Retention purges uploads not completed within 24 hours.
+- Screens: the review form (members post under their account name, choose up to 5 photos and 1 video with description and ownership tick, see upload progress and any refused file on the receipt), a gallery on review cards, and media preview plus per-item rejection in the staff queue.
+- Tests: `tests/test_media.py` (17: EXIF/GPS removal, scaling, SVG/GIF/oversized/truncated images, MP4 metadata stripping with unchanged offsets, too long, HEVC, non-MP4, the full submit → upload → moderate → feed flow, upload rules, rejection, abandoned purge). Backend 454 passing; frontend 56 and staff 23 vitest passing; both apps build.
+
+**Still open**
+- ~~Migration `0016_review_media` on the online database~~ Applied 27 Oct 2026 (owner approved); a photo and a video were uploaded through online Storage and a GIF posing as JPEG was refused (`TYPE`).
+- No video poster image or low-bitrate rendition (no transcoding by decision); approved media of a later hidden or removed review stay stored until the review is deleted.
+

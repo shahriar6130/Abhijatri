@@ -129,7 +129,17 @@ function isReturning(): boolean {
  * Counts this browser at most once per Dhaka day. Returns whether a request was sent. A failed
  * request leaves the dates untouched, so the next load tries again.
  */
-export async function recordDailyVisit(now: Date = new Date()): Promise<boolean> {
+export function recordDailyVisit(now: Date = new Date()): Promise<boolean> {
+  // One request at a time: a second call (StrictMode double effect) shares the first one's result.
+  inFlightVisit ??= sendDailyVisit(now).finally(() => {
+    inFlightVisit = null;
+  });
+  return inFlightVisit;
+}
+
+let inFlightVisit: Promise<boolean> | null = null;
+
+async function sendDailyVisit(now: Date): Promise<boolean> {
   const today = currentDisplayDate(now);
   touchGuestName(today);
   const lastVisit = read(LAST_VISIT_KEY) ?? read(RETIRED_LAST_VISIT_KEY);

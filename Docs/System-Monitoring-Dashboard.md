@@ -1,6 +1,7 @@
 # System Monitoring Dashboard
 
-**Status:** Phase 1 implemented 22 October 2026 (token access, six panels, operations API, ops app, nightly roll-up). Proposed 21 October 2026.
+**Status:** Phase 1 implemented 22 October 2026 (token access, six panels, operations API, ops app, nightly roll-up); completed 27 October 2026 (catalogue-driven layout, 5xx counting of unhandled errors, `reviews.submitted` counter, full test coverage, test guide in section 12). Proposed 21 October 2026.
+**Live:** dashboard `https://abhijatri-ops-44afee.vercel.app` (Vercel), API `https://abhijatri-backend.up.railway.app` (Railway, `abhijatri-api`).
 **Companion:** `Docs/Guest-Identity-and-Visits.md` (produces the visitor numbers). Section 9 describes how the two connect. Issues with the earlier draft: `Docs/Reviews/Guest-Identity-Monitoring-review.md`.
 **Goal from the team chat:** a private System Monitoring Dashboard where the team "sees everything in the system", and where new things can be connected later without rebuilding it.
 
@@ -99,11 +100,13 @@ class ReviewsPanel(Panel):
     sources = ("postgres",)           # postgres | redis | config | external
     owner = "backend"                 # who answers for it
 
-    async def collect(self, ctx) -> dict:   # ctx: db session, redis, settings, days
+    def collect(self, ctx) -> PanelResult:   # ctx: db session, redis, settings, days
         ...                                  # aggregates only; returns the 6.2 shape
 ```
 
 `app/ops/registry.py` collects registered panels, runs each `collect` with the time budget, catches its errors, and adds `status`, `generated_at` and `sources`.
+
+As built, `collect` is **synchronous** (it runs in a worker thread, 16 at most), not `async`. The registry adds `title`, `refresh_seconds` and `notes` to every panel. The optional `"view"` field is not implemented yet because no panel needs it. A provider that times out is cut off from the response, but its worker thread keeps running until `collect` returns, so keep every query short (the database statement timeout is the backstop).
 
 ### 6.2 Panel data format
 
@@ -220,3 +223,105 @@ A change to any shared item updates both documents in the same commit.
 | Panel shape | Every registered panel matches 6.2 |
 | No identifiers | No panel output contains a guest tag, email, IP or secret pattern (`abr1_`, scope length) |
 | Event allowlist | Counting an unknown name fails the test suite |
+| Unhandled errors | A request that raises is counted in `http.5xx` and `route_5xx:<template>` (never the raw path) |
+| Limits and headers | 60 requests a minute then `429`; `no-store` on 200, 401, 404 and 429 |
+| CORS | The ops origin passes the preflight with the `Authorization` header; another origin gets no CORS header |
+| Real data | `content` shows the published destinations; `traffic` shows counted events; `reviews.submitted` rises on a created review |
+| Ops app | The client sends the token only in the header, keeps it in `sessionStorage`, orders panels by the catalogue, and renders all four block types in both languages |
+
+## 12. Testing guide (local and live)
+
+### 12.1 Automated checks
+
+```text
+cd backend
+$env:TEST_DATABASE_URL = "postgresql+psycopg://abhijatri:abhijatri_dev@localhost:5434/abhijatri_test"
+.venv\Scripts\python -m pytest -q          # 341 tests, none skipped when the variable is set
+.venv\Scripts\python -m ruff check .
+.venv\Scripts\python -m mypy app
+cd ..\ops      ; npm ci ; npm test ; npm run build     # 19 tests
+cd ..\frontend ; npm ci ; npm test ; npm run build     # 40 tests; the public build must not mention ops
+```
+
+`TEST_DATABASE_URL` must name a database ending in `_test`; the suite drops and recreates its tables. Start the local services first: `docker compose up -d postgres redis` with `POSTGRES_PORT=5434`.
+
+### 12.2 Run everything locally
+
+1. Services: `docker compose up -d postgres redis` (Postgres on 5434, Redis on 6379).
+2. `backend/.env` must hold `DATABASE_URL` (port 5434), `REDIS_URL=redis://localhost:6379/0`, `OPS_DASHBOARD_TOKEN` (43 characters), `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174`.
+3. Migrate: `cd backend ; .venv\Scripts\python -m alembic upgrade head` (expect `0009_guest_tag_visit_stats (head)`).
+4. API: `.venv\Scripts\python -m uvicorn app.main:app --port 8000 --reload` and check `http://localhost:8000/api/v1/health` returns `{"status":"ok"}`.
+5. Public app: `cd frontend ; npm run dev -- --port 5173` (http://localhost:5173).
+6. Dashboard: `cd ops ; npm run dev -- --port 5174` (http://localhost:5174). Without `ops/.env` it calls `http://localhost:8000`.
+7. Open http://localhost:5174, paste the token from `backend/.env`, press **Open dashboard**.
+
+### 12.3 What to check on the dashboard, panel by panel
+
+| Step | Do this | Expect |
+|---|---|---|
+| 1 | Open the dashboard with a wrong token | "The token is not valid." and you stay on the token page. Ten wrong tries in an hour give "Too many failed attempts". |
+| 2 | Open it with the right token | Six panels: Visitors, Content, Reviews, Traffic, Health, Members, in the order of `GET /ops/panels`, each with an `ok` badge and a "sources / fresh" footer. |
+| 3 | In the public app, open http://localhost:5173 once (new browser profile or cleared storage) | **Visitors**: Guest 1, New Guest 1, Total visits (A) 1, New (B) 1, **Old visits (A − B) 0**. |
+| 4 | Reload the public app the same day | Nothing changes: one visit per browser per Dhaka day. |
+| 5 | In dev tools run `localStorage.setItem('abhijatri_last_visit_on','2000-01-01')`, reload the public app | A second post with `first_visit:false`. Dashboard Refresh: Guest 2, New 1, **Old 1**. A − B equals Old. |
+| 6 | Press **Start as a new guest** on `/guest`, then reload | The tag changes but the visit dates stay, so **New Guest does not rise**. |
+| 7 | Submit a guest review in the public app (Turnstile test key locally) | **Reviews**: pending rises by one and the by-status table shows the new row. **Traffic** after up to 60 s: 2xx rises. |
+| 8 | Switch 7 / 30 / 90 days | Charts redraw. Days with no roll-up show gaps, not zeros. |
+| 9 | Press **Run roll-up** | "Nothing new to roll up" the first day; after midnight (Dhaka) it lists the finished day. Pressing it again is harmless (idempotent). |
+| 10 | Stop Redis (`docker compose stop redis`) and Refresh | **Visitors** and **Traffic** show `degraded` with dashes (never 0); **Health** shows Redis down; the other panels stay `ok`. Start it again with `docker compose start redis`. |
+| 11 | Switch to বাংলা | Titles, labels, table headers and digits are in Bangla. |
+| 12 | Press **Sign out**, then reopen the tab | The token is gone: `sessionStorage` is cleared when the tab closes. |
+| 13 | Dev tools, Application: check storage | Only `sessionStorage` has `abhijatri_ops_token`; `localStorage` has none from the dashboard. |
+| 14 | Dev tools, Network | Every ops call has `Authorization: Bearer …`, no cookie, no token in any URL, and `Cache-Control: no-store` on the responses. |
+
+Generate traffic quickly from a terminal (no token needed for these):
+
+```text
+curl -X POST http://localhost:8000/api/v1/guest-visits -H "Content-Type: application/json" -d "{\"first_visit\":true}"
+curl http://localhost:8000/api/v1/does-not-exist        # a 4xx for the Traffic panel
+```
+
+API-level checks (replace `$T` with the token, never paste it into chat or a URL):
+
+```text
+curl -i http://localhost:8000/api/v1/ops/panels                              # 401, no body detail
+curl -i -H "Authorization: Bearer $T" http://localhost:8000/api/v1/ops/panels   # 200, six panels
+curl -i "http://localhost:8000/api/v1/ops/overview?days=7" -H "Authorization: Bearer $T"
+curl -i -X POST http://localhost:8000/api/v1/ops/jobs/visit-rollup -H "Authorization: Bearer $T"
+curl -i "http://localhost:8000/api/v1/ops/overview?token=$T"                 # 401: a URL token is never accepted
+```
+
+### 12.4 Live (Railway API + Vercel dashboard)
+
+Live addresses: dashboard `https://abhijatri-ops-44afee.vercel.app`, API `https://abhijatri-backend.up.railway.app`.
+
+1. **Deploy order.** Push `backend-dev` to GitHub and merge to `main` so Railway redeploys the API (Railway builds from `main`). Then redeploy the dashboard from `ops/` (Vercel project root directory `ops`, build `npm run build`, output `dist`). Set the Vercel environment variable `VITE_API_BASE_URL=https://abhijatri-backend.up.railway.app` for Production **before** the build, because Vite bakes it in.
+2. **Railway variables** (service `abhijatri-api`, environment `production`): `OPS_DASHBOARD_TOKEN` (at least 32 characters), `REDIS_URL` (`rediss://…` Upstash), `CORS_ALLOWED_ORIGINS` containing `https://abhijatri-ops-44afee.vercel.app` and your public frontend origin (exact scheme and host, no trailing path, never `*`), `APP_ENV=production`, `CLIENT_ADDRESS_HEADER`, `TURNSTILE_*`. After a change, Railway redeploys; confirm the deploy shows `SUCCESS`.
+3. **Smoke tests from a terminal:**
+
+```text
+curl https://abhijatri-backend.up.railway.app/api/v1/health                  # {"status":"ok"}
+curl -i https://abhijatri-backend.up.railway.app/api/v1/ops/panels           # 401 (404 would mean the token is unset)
+curl -i -X OPTIONS https://abhijatri-backend.up.railway.app/api/v1/ops/overview \
+  -H "Origin: https://abhijatri-ops-44afee.vercel.app" \
+  -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization"
+                                                                              # 200 with access-control-allow-origin = the ops origin
+curl -I https://abhijatri-ops-44afee.vercel.app                              # x-robots-tag: noindex, nofollow, noarchive and a strict content-security-policy
+```
+
+4. **In the browser:** open the dashboard URL, paste the production token, and repeat 12.3 steps 2 and 8 to 14. The footer of the token page shows `API: <the API it will call>`; it must be the Railway address, not localhost.
+5. **Public traffic into the live dashboard:** visit the public app (Vercel) once; after reloading the dashboard, Visitors shows the visit. Live visits are counted in Upstash, so Visitors works only when `REDIS_URL` is set and `VISIT_COUNTER_ENABLED` is not `false`.
+6. **Nightly roll-up:** GitHub, Actions, **visit-rollup**, **Run workflow**. It needs the repository secrets `OPS_API_URL` (the Railway address) and `OPS_DASHBOARD_TOKEN`; without them the job skips cleanly. Expect a green run and "Rolled up" or "Nothing new" in the dashboard.
+
+### 12.5 If something is wrong
+
+| Symptom | Cause and fix |
+|---|---|
+| "Could not reach the API" with the right URL | The API is down, the deployed API predates the ops routes, or `CORS_ALLOWED_ORIGINS` lacks the dashboard origin (shown in the message). Fix the variable and redeploy. |
+| "The ops API is off" (404) | `OPS_DASHBOARD_TOKEN` is unset on the API. Set it (32 or more characters) and redeploy. |
+| Token page shows `API: http://localhost:8000` on Vercel | `VITE_API_BASE_URL` was missing at build time. Set it and redeploy the dashboard. |
+| Blocked by the browser (CSP `connect-src`) | `ops/vercel.json` allows only `*.up.railway.app` and `*.onrender.com`. A custom API domain must be added there. |
+| Visitors shows `degraded` and dashes | Redis is unreachable or `REDIS_URL` is wrong (production needs `rediss://`). Check Health for the Redis line. |
+| Traffic shows zeros after real traffic | Events flush every 60 s; wait a minute and refresh. |
+| "Too many failed attempts" | 10 wrong tokens from one network in an hour. Wait, or rotate the token. |
+| Production API refuses to start | A short token (under 32 characters), a missing `rediss://` URL or `*` in CORS. Read the Railway deploy log. |

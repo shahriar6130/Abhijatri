@@ -42,6 +42,18 @@ def test_every_public_table_has_row_level_security() -> None:
             ).all()
         assert rows, "migration created no tables"
         assert [name for name, enabled in rows if not enabled] == []
+        with engine.connect() as conn:
+            roles = conn.execute(text("SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated')")).scalars().all()
+            granted = conn.execute(
+                text(
+                    "SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants "
+                    "WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated')"
+                )
+            ).all()
+        # RLS does not replace grants (Notification spec 10): the browser roles get nothing on any table.
+        assert granted == [], f"browser roles must have no table grants: {granted}"
+        if not roles:
+            pytest.skip("this PostgreSQL has no Supabase roles; grants checked only for RLS")
     finally:
         with engine.begin() as conn:
             conn.execute(text("DROP SCHEMA public CASCADE"))

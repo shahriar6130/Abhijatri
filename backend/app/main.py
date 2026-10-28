@@ -8,12 +8,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.admin.routes import member_router as reports_router
+from app.admin.routes import router as admin_router
 from app.api import router
+from app.auth.routes import router as auth_router
 from app.config import get_settings
+from app.db import SessionLocal
 from app.destination_api import router as destination_router
 from app.errors import ApiError, error_response, install_error_handlers
 from app.guest_tag import DISPLAY_PATTERN
 from app.limits import limiter
+from app.member_routes import router as member_router
+from app.notify.admin_routes import router as notification_admin_router
+from app.notify.webhooks import router as webhook_router
+from app.notify.worker import NotificationWorker
 from app.ops import events
 from app.ops.routes import router as ops_router
 
@@ -65,9 +73,12 @@ def _count_response(request: Request, status_code: int) -> None:
 async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
     flusher = events.Flusher()
     flusher.start()
+    worker = NotificationWorker(SessionLocal)  # outbox relay and email sender (Moderation spec 6.7)
+    worker.start()
     try:
         yield
     finally:
+        worker.stop()
         flusher.stop()
 
 
@@ -135,21 +146,33 @@ def create_app() -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         # Status classes and route templates only, never raw paths (Dashboard doc 6.3, PF 26).
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # An unhandled exception becomes a 500 in Starlette's outermost handler, after this
+            # middleware; count it here or the dashboard's 5xx numbers would miss real failures.
+            _count_response(request, 500)
+            raise
         _count_response(request, response.status_code)
         return response
 
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "PATCH"],
-        allow_headers=["Content-Type", "Idempotency-Key", "Authorization"],
-        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Idempotency-Key", "Authorization", "X-CSRF-Token"],
+        allow_credentials=True,  # cookie sessions (R04); origins stay an explicit list, never "*"
         max_age=600,
     )
     application.include_router(router)
     application.include_router(destination_router)
     application.include_router(ops_router)
+    application.include_router(auth_router)
+    application.include_router(admin_router)
+    application.include_router(reports_router)
+    application.include_router(notification_admin_router)
+    application.include_router(webhook_router)
+    application.include_router(member_router)
     return application
 
 

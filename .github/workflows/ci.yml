@@ -110,9 +110,29 @@ jobs:
         name: Public build carries no ops dashboard code (System-Monitoring-Dashboard 11)
         working-directory: frontend
         run: |
-          if grep -rIl -e "/api/v1/ops" -e "OPS_DASHBOARD_TOKEN" -e "abhijatri_ops_token" dist; then
+          if [ -z "$(ls -A dist 2>/dev/null)" ]; then
+            echo "frontend/dist is empty: the check below would pass for the wrong reason."; exit 1
+          fi
+          if grep -rIl -e "/api/v1/ops" -e "OPS_DASHBOARD_TOKEN" -e "abhijatri_ops_token" -e "abhijatri-ops" -e "/api/v1/admin" dist; then
             echo "The public frontend build must not reference the ops dashboard."; exit 1
           fi
+
+  staff:
+    # The moderation dashboard is its own build (Moderation spec 3.2); the public build must never contain it.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staff
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: staff/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
 
   ops:
     runs-on: ubuntu-latest

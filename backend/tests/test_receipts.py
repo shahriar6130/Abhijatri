@@ -25,6 +25,7 @@ from app.models import (
     ReviewReceipt,
     User,
 )
+from app.ops import events
 
 KEY_V1 = "k1-" + "a" * 40
 KEY_V2 = "k2-" + "b" * 40
@@ -180,8 +181,10 @@ def api(postgres_session: Session) -> Generator[tuple[TestClient, Session, Desti
 def test_submit_returns_201_without_any_receipt(api: Any) -> None:
     client, session, destination = api
     body = _payload(destination.id)
+    before = events.pending().get("reviews.submitted", 0)
     response = client.post("/api/v1/reviews/guest", json=body)
     assert response.status_code == 201, response.text
+    assert events.pending().get("reviews.submitted", 0) == before + 1
     data = response.json()
     assert set(data) == {"review_id", "status", "version", "duplicate_recovered"}
     assert data["duplicate_recovered"] is False

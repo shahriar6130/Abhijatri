@@ -1,4 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { getSession, login as loginRequest, logout as logoutRequest } from '../api/auth';
+import type { AuthSession, StaffRole } from '../types';
 import {
   loadGuestName,
   loadGuestTag,
@@ -14,7 +16,7 @@ import {
  * Verified Members), but it is never an authorization boundary: the API decides every permission
  * server-side (Review.md 1.1, PF 8).
  *
- * Every visitor is a guest until the account service exists (R04). Each browser has a guest tag
+ * A visitor is a guest until they sign in (R04). Each browser has a guest tag
  * such as `1C669-J0TDY`, derived on the device from the guest scope secret
  * (Guest-Identity-and-Visits 3.1). A guest may give a name on `/guest`; it stays on this device for
  * 30 days after the last visit. The server only counts visits per day and never learns who visited.
@@ -23,11 +25,16 @@ import {
  */
 export type Session =
   | { kind: 'guest'; displayName: string | null; guestTag: string | null }
-  | { kind: 'member'; displayName: string; verifiedMember: boolean };
+  | { kind: 'member'; displayName: string; email: string; verifiedMember: boolean; role: StaffRole | null };
 
 interface SessionContextValue {
   session: Session;
   isVerifiedMember: boolean;
+  /** loading until the first answer from GET /auth/session; the page renders as a guest meanwhile. */
+  status: 'loading' | 'ready';
+  /** Signs in with the account service; throws ApiError (code INVALID_CREDENTIALS, EMAIL_NOT_VERIFIED, RATE_LIMITED, ...). */
+  signIn: (email: string, password: string) => Promise<void>;
+  refresh: () => Promise<void>;
   /** Saves the guest's name locally (a 30-day session on this device). */
   setGuestName: (name: string) => void;
   /** Forgets the stored name ("Not you?"); the tag and visit dates stay. */
@@ -45,6 +52,9 @@ interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue>({
   session: { kind: 'guest', displayName: null, guestTag: null },
   isVerifiedMember: false,
+  status: 'loading',
+  signIn: async () => undefined,
+  refresh: async () => undefined,
   setGuestName: () => undefined,
   clearGuestName: () => undefined,
   startAsNewGuest: async () => undefined,
@@ -54,6 +64,8 @@ const SessionContext = createContext<SessionContextValue>({
 export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [displayName, setDisplayName] = useState<string | null>(() => loadGuestName());
   const [guestTag, setGuestTag] = useState<string | null>(null);
+  const [account, setAccount] = useState<Extract<AuthSession, { authenticated: true }> | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready'>('loading');
 
   useEffect(() => {
     let active = true;
@@ -62,12 +74,35 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (active) setGuestTag(tag);
       })
       .catch(() => undefined); // no WebCrypto (insecure origin): the badge shows without a tag
-    // Every app load counts this browser once per Dhaka day (API.md 5.14). Counting is best
-    // effort: a failure is retried on the next load and never blocks the page.
-    void recordDailyVisit().catch(() => undefined);
+    // Ask the server who this is. A signed-in member is counted by the server (GET /auth/session);
+    // everyone else is counted once per Dhaka day as a guest (API.md 5.14). Both are best effort:
+    // a failure is retried on the next load and never blocks the page.
+    getSession()
+      .then((answer) => {
+        if (!active) return;
+        if (answer.authenticated) setAccount(answer);
+        else void recordDailyVisit().catch(() => undefined);
+      })
+      .catch(() => {
+        if (active) void recordDailyVisit().catch(() => undefined); // accounts unavailable: still a guest
+      })
+      .finally(() => {
+        if (active) setStatus('ready');
+      });
     return () => {
       active = false;
     };
+  }, []);
+
+  /** Re-reads the session, e.g. after a verification was approved. */
+  const refresh = useCallback(async () => {
+    const answer = await getSession().catch(() => null);
+    if (answer?.authenticated) setAccount(answer);
+  }, []);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const answer = await loginRequest(email, password);
+    if (answer.authenticated) setAccount(answer);
   }, []);
 
   const setGuestName = useCallback((name: string) => {
@@ -87,20 +122,38 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   const signOut = useCallback(() => {
+    if (account) {
+      // End the server session; the page returns to the guest view whether or not the call succeeds.
+      void logoutRequest()
+        .catch(() => undefined)
+        .finally(() => setAccount(null));
+      return;
+    }
     signOutGuest();
     setDisplayName(null);
-  }, []);
+  }, [account]);
 
   const value = useMemo<SessionContextValue>(
     () => ({
-      session: { kind: 'guest', displayName, guestTag },
-      isVerifiedMember: false,
+      session: account
+        ? {
+            kind: 'member',
+            displayName: account.user.display_name,
+            email: account.user.email,
+            verifiedMember: account.verified_member, // an approved verification, not email verification alone
+            role: account.role,
+          }
+        : { kind: 'guest', displayName, guestTag },
+      isVerifiedMember: Boolean(account?.verified_member),
+      status,
+      signIn,
+      refresh,
       setGuestName,
       clearGuestName,
       startAsNewGuest,
       signOut,
     }),
-    [displayName, guestTag, setGuestName, clearGuestName, startAsNewGuest, signOut],
+    [account, displayName, guestTag, status, signIn, refresh, setGuestName, clearGuestName, startAsNewGuest, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

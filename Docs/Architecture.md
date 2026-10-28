@@ -105,6 +105,7 @@ GitHub PR -> CI (lint, unit, PostgreSQL integration, migration, security, contra
 | `RECEIPT_OPS_PER_RECEIPT_PER_HOUR`, `RECEIPT_OPS_PER_NETWORK_PER_HOUR`, `RECEIPT_FAILURES_SHORT_LIMIT`, `RECEIPT_FAILURES_LONG_LIMIT` | no | Receipt-operation limits (defaults 20, 100) and the failure tiers (5 per 15 minutes, 20 per 24 hours) that drive the progressive block. |
 | `GUEST_PENDING_PER_DESTINATION`, `GUEST_PENDING_TOTAL`, `GUEST_PENDING_ALERT_RATIO` | no | Pending Guest ceilings (50, 500); a warning is logged from 80 percent; reaching a ceiling returns `503 GUEST_WRITES_PAUSED`. |
 | `REDIS_URL` | prod: yes | Upstash `rediss://` URL for this environment (one database per environment). Production start-up fails if it is missing or not TLS. Locally `redis://localhost:6379/0` from `compose.yaml`. |
+| `RATE_LIMIT_GUEST_VISIT`, `GUEST_VISITS_PER_NETWORK_PER_HOUR` | no | Guest-visit limits: burst pre-filter (20/minute) and durable per-network cap (60/hour, then `429 RATE_LIMITED`). |
 | `REDIS_TIMEOUT_MS`, `VISIT_COUNTER_ENABLED`, `METRICS_FLUSH_SECONDS` | no | Redis command timeout (300 ms), the visit-counting kill switch, and the ops event flush interval (60 s). |
 | `OPS_DASHBOARD_TOKEN`, `OPS_AUTH_FAILURES_PER_NETWORK_PER_HOUR` | no | Bearer token for `/api/v1/ops` (≥ 32 chars in production; unset = 404) and the failure limit (10 per network per hour). |
 | `GUEST_WRITES_PAUSED` | no | Emergency switch. Pauses new Guest submissions only; reads, receipt status and recovery of an existing draft continue. |

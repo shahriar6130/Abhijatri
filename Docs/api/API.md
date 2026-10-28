@@ -35,12 +35,12 @@
 | None | Public reads, health | Nothing. Public `GET` routes are CORS simple requests: no custom headers, no credentials. |
 | Guest scope secret | Guest submission | `guest_scope_secret` in the body. Supplemental signal only, not an abuse boundary (PF 14.1). |
 | Guest receipt | Receipt operations | `receipt_secret` in the body (Section 5.1). |
-| Member session | Member endpoints | Cookie `__Host-abhijatri_session` (`SameSite=Lax`) plus `X-CSRF-Token` on writes. |
-| Staff session | `/staff/*` | Cookie `__Host-abhijatri_staff_session` (`SameSite=Strict`) plus `X-CSRF-Token` on writes. Member sessions never authorise staff routes and staff sessions never authorise member routes. |
+| Member session | Member endpoints | Cookie `__Host-abhijatri_session` (the Supabase access token, `HttpOnly`, `SameSite=Lax`) with `__Host-abhijatri_refresh` (the refresh token); `X-CSRF-Token` on writes. Implemented 27 Oct 2026. |
+| Staff session | `/admin/*` (replaces `/staff/*`) | The same session cookies. Staff are members who hold an active row in `user_roles` and have passed TOTP (`aal2`). The role is read from the database on every request, never from the token. Non-staff get `404`, staff of the wrong role `403`. |
 
-Both cookies are host-only on `api.<owned-domain>`, `Secure`, `HttpOnly`, `Path=/`, with no `Domain` attribute (PF 5.3). No receipt cookie exists.
+Identity is provided by Supabase Auth (decision of 27 Oct 2026, deviating from PF 8.1); the browser still talks only to this API, which proxies Auth and keeps the tokens in cookies. The cookies are host-only, `Secure`, `HttpOnly`, `Path=/`, with no `Domain` attribute (PF 5.3). No receipt cookie exists. Cookie sessions across different sites (for example Vercel and Railway) need the owned same-site domain (PF 5.5).
 
-Until the staff authentication adapter lands (R04), staff routes accept the development-only `X-Test-Staff-Id` header when `APP_ENV` is `development` or `test`, and return `501 STAFF_AUTH_NOT_CONFIGURED` in production.
+The development-only `X-Test-Staff-Id` header remains for the old `/staff/moderation/*` routes while `APP_ENV` is `development` or `test`; they return `501 STAFF_AUTH_NOT_CONFIGURED` in production and are replaced by `/admin/*`.
 
 ### 1.2 CORS and CSRF
 
@@ -74,6 +74,11 @@ Every error, including validation errors, uses one shape (PF 12.3). FastAPI's de
 | HTTP | `code` | When |
 |---|---|---|
 | 401 | `AUTH_REQUIRED` | Missing or invalid session. |
+| 401 | `INVALID_CREDENTIALS` | Wrong email or password, or a wrong TOTP code. Never says which. |
+| 403 | `EMAIL_NOT_VERIFIED` | Correct password, address not yet verified. |
+| 403 | `ACCOUNT_DISABLED` | The account has been disabled. |
+| 403 | `MFA_REQUIRED` | A staff action needs a session that passed TOTP (`aal2`). |
+| 403 | `REAUTH_REQUIRED` | A high-impact action needs a password check within the last 10 minutes. |
 | 403 | `FORBIDDEN` | Authenticated but not permitted. |
 | 403 | `SELF_MODERATION_FORBIDDEN` | A moderator acts on their own review. |
 | 403 | `CSRF_INVALID` | Missing or wrong `X-CSRF-Token`. |
@@ -83,18 +88,21 @@ Every error, including validation errors, uses one shape (PF 12.3). FastAPI's de
 | 409 | `REVIEW_VERSION_CONFLICT` | `expected_version` is stale. |
 | 409 | `INVALID_TRANSITION` | The decision is not allowed from the current state. |
 | 409 | `DRAFT_ALREADY_SUBMITTED` | Duplicate draft with a different receipt (Section 5.2). |
+| 409 | `MEMBER_REVIEW_EXISTS` | A member already has an active review of that destination for that visit month (Section 5.20). |
 | 409 | `RESERVED_DISPLAY_NAME` | Display name is reserved (for example `Admin`, `Moderator`). |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | Same `Idempotency-Key` with a different request body. |
 | 409 | `DUPLICATE_OPEN_REPORT` | The same scope already has an open report on this review. |
 | 409 | `APPEAL_WINDOW_CLOSED` | Appeal sent after the 30-day window. |
 | 413 | `PAYLOAD_TOO_LARGE` | Request body exceeds the configured limit. |
+| 422 | `TOKEN_INVALID_OR_EXPIRED` | An email verification or password-reset link is wrong, used or expired. |
 | 422 | `VALIDATION_FAILED` | Schema validation failed; see `field_errors`. |
 | 422 | `INVALID_CURSOR` | `after` cannot be decoded. |
 | 422 | `INVALID_RECEIPT_FORMAT` | Receipt is not `abr1_` plus 43 base64url characters, or is a known weak value. |
 | 429 | `RATE_LIMITED` | A limit in Section 7 was hit. `Retry-After` is set. |
 | 503 | `GUEST_WRITES_PAUSED` | Pending ceiling reached or emergency switch on (PF 14.3, 14.6). Public reads continue. |
 | 500 | `INTERNAL_ERROR` | Unexpected failure. |
-| 501 | `STAFF_AUTH_NOT_CONFIGURED` | Staff route in production before R04. |
+| 501 | `AUTH_NOT_CONFIGURED` | The Supabase settings are missing, so no sign-in route works. |
+| 501 | `STAFF_AUTH_NOT_CONFIGURED` | Old `/staff/*` route in production (replaced by `/admin/*`). |
 | 503 | `SERVICE_UNAVAILABLE` | Database unavailable or pool exhausted. `Retry-After` is set. |
 | 504 | `REQUEST_TIMEOUT` | Request exceeded the server timeout. |
 
@@ -115,7 +123,7 @@ Retryable writes accept `Idempotency-Key: <UUID>` (PF 12.4).
 |---|---|---|---|
 | `GET /health` (also `HEAD`) | none | no-store | Implemented |
 | `GET /health/ready` (also `HEAD`) | none | no-store | Change required |
-| `GET /auth/csrf` | member or staff session | no-store | Planned (R04) |
+| `GET /auth/csrf` | member or staff session | no-store | Implemented 27 Oct 2026 (section 5.17) |
 | `POST /guest-visits` | none (body `{ "first_visit": bool }` only, no cookie) | no-store | Implemented; Redis day counters since 22 Oct 2026 (section 5.14) |
 | `GET /guest-visits/stats` | — | — | **Removed 22 Oct 2026**: traffic volume is not public; the numbers moved to `GET /ops/overview` (5.16) |
 | `GET /ops/panels` | ops token (`Authorization: Bearer`) | no-store | Implemented 22 Oct 2026 (section 5.16) |
@@ -163,7 +171,7 @@ Public responses vary by `Accept-Language` and are purged on moderation or delet
 
 | Method and path | Credential | Cache | Status |
 |---|---|---|---|
-| `POST /auth/register`, `/auth/verify-email`, `/auth/login`, `/auth/logout`, `/auth/password-reset/request`, `/auth/password-reset/confirm` | none or member | no-store | Planned (R04). Shapes are set by `Features/Identity-Access-Verification.md`. |
+| `POST /auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/logout`, `/auth/password-reset/request`, `/auth/password-reset/confirm`, `GET /auth/session`, `POST /auth/mfa/enroll`, `/auth/mfa/verify`, `/auth/reauth` | none or member | no-store | Implemented 27 Oct 2026 (R04, section 5.17) |
 | `POST /reviews/member` | member | no-store | Planned (R07) |
 | `GET /reviews/{review_id}` | owner or staff | no-store | Planned (R07) |
 | `POST /verifications` | member | no-store | Planned (R04) |
@@ -606,6 +614,92 @@ Panel shape (dashboard doc 6.2): `{ id, version, title, status: ok|degraded|unav
 
 Panels: `visitors`, `content`, `reviews`, `traffic`, `health`, `members`.
 
+### 5.17 Authentication: `/auth/*` (R04, implemented 27 October 2026)
+
+All responses are `no-store`. Identity is Supabase Auth, proxied by this API; no body ever contains a token. A write from a browser must carry an allowed `Origin`. Cookie-authenticated writes also need `X-CSRF-Token` from `GET /auth/csrf`.
+
+| Route | Request body | Response |
+|---|---|---|
+| `POST /auth/register` | `{ email, password, display_name, turnstile_token? }`; password at least 10 characters with a letter and a digit; display name 1 to 80 characters, not reserved | `202 { "status": "verification_sent" }`, identical for new and existing addresses. `409 RESERVED_DISPLAY_NAME`, `422 VALIDATION_FAILED` |
+| `POST /auth/verify-email` | `{ token_hash }` from the emailed link | `200 { "status": "verified" }`; no session is created. `422 TOKEN_INVALID_OR_EXPIRED` |
+| `POST /auth/resend-verification` | `{ email }` | `202`, identical for any address |
+| `POST /auth/login` | `{ email, password }` | `200` session payload (below) and the two cookies. `401 INVALID_CREDENTIALS`, `403 EMAIL_NOT_VERIFIED`, `403 ACCOUNT_DISABLED`, `429` |
+| `POST /auth/logout` | none; needs `X-CSRF-Token` | `204`; cookies cleared and the Auth session revoked |
+| `POST /auth/password-reset/request` | `{ email, turnstile_token? }` | `202 { "status": "reset_sent" }`, identical for any address |
+| `POST /auth/password-reset/confirm` | `{ token_hash, new_password }` | `200 { "status": "password_changed" }`; every session of the account ends. The password is checked before the one-time link is spent |
+| `GET /auth/csrf` | none | `{ "csrf_token": "..." }` bound to the session |
+| `GET /auth/session` | none | `{ "authenticated": false }` or the session payload. Counts the member's visit day once per Dhaka day |
+| `POST /auth/mfa/enroll` | none (CSRF) | `{ factor_id, secret, uri, qr_code }` for an authenticator app |
+| `POST /auth/mfa/verify` | `{ factor_id, code }` (6 digits, CSRF) | `{ aal: "aal2", auth_time, csrf_token }` and new cookies |
+| `POST /auth/reauth` | `{ password, code? }` (CSRF); `code` required when TOTP is enrolled | `{ aal, auth_time, csrf_token }` and new cookies |
+
+Session payload: `{ authenticated: true, user: { id, email, display_name, email_verified }, role: null | "moderator" | "superadmin", aal: "aal1" | "aal2", mfa_factors: [{ id, type }], auth_time }`. Cookies: `__Host-abhijatri_session` (access token, lifetime of the token) and `__Host-abhijatri_refresh` (30 days), both `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
+
+### 5.18 Staff API: `/admin/*` (Moderation spec 8, Gantt R10 and R11; implemented 27 October 2026)
+
+Needs a member session that holds an active staff role (`user_roles`, read from the database on every request) and passed TOTP (`aal2`). Everyone else gets `404`; a role that is too low gets `403`. All responses are `no-store`; writes need `X-CSRF-Token`. Decisions accept an `Idempotency-Key` (8 to 100 characters of letters, digits, `-`, `_`): the same key and payload returns the first result, the same key with another payload is `409 IDEMPOTENCY_KEY_REUSED`.
+
+| Route | Who | Body and result |
+|---|---|---|
+| `GET /admin/queue?task_type=&limit=` | staff | `{ items: [{ id, task_type, subject_id, status, required_role, escalated, claimed_by, lease_expires_at, version, claimable, lease_active, lease_token (holder only), subject }], generated_at }`, oldest and highest priority first. `subject` carries the review or report content. |
+| `POST /admin/tasks/{task_id}/claim` | staff | The task with `lease_token`. `409 TASK_NOT_AVAILABLE` while another live lease exists; `403` when escalated above the caller. A lease lasts 5 minutes; an expired one can be taken over. |
+| `POST /admin/tasks/{task_id}/heartbeat` and `POST /admin/tasks/{task_id}/release` | holder | `{ lease_token }`. `409 LEASE_LOST` when the lease expired or moved. |
+| `POST /admin/tasks/{task_id}/escalate` | holder | `{ lease_token, reason }`. The task now needs a superadmin and the holder's lease ends. |
+| `POST /admin/submissions/{review_id}/moderation-actions` | staff | `{ task_id, lease_token, expected_version, decision: PUBLISH\|REJECT\|HIDE\|RESTORE, reason_code, note? }` -> `{ review_id, status, version, counted_rating, task_id }`. Order: role, lease, state and version, action row, audit row, event, one commit. `409 REVIEW_VERSION_CONFLICT`, `409 LEASE_LOST`, `422 TRANSITION_NOT_ALLOWED`, `403 SELF_MODERATION_FORBIDDEN`. |
+| `POST /admin/submissions/{review_id}/conflict` | staff | `{ expected_version, conflict_declared, reason_code, note? }` |
+| `POST /admin/bulk/moderation-actions` | staff | `{ items: [{ review_id, ...decision body }] }` (at most 25). Each item is atomic; the answer lists `{ review_id, ok, result \| error }` per item plus `succeeded` and `failed`. |
+| `POST /admin/reports/{report_id}/transition` | staff | `{ to: in_review\|actioned\|dismissed, expected_version, reason_code, note?, task_id, lease_token }`. Allowed: `open` -> `in_review`, `actioned`, `dismissed`; `in_review` -> `actioned`, `dismissed`. Anything else is `422 TRANSITION_NOT_ALLOWED`. |
+| `GET /admin/audit-events?action=&target_type=&target_id=&actor_user_id=&before=&limit=` | staff | Newest first, `{ items, next_before }` |
+| `GET /admin/audit-events/{event_id}` | staff | One event; `id` is globally unique |
+| `GET /admin/staff` | superadmin | Active staff and roles |
+| `GET /admin/users?q=` | superadmin | `{ items: [{ user_id, display_name, email, status, role }] }`: accounts whose email contains `q` (3 or more characters, at most 10 rows), to pick someone for a role |
+| `POST /admin/staff/{user_id}/role` | superadmin, password confirmed within 10 minutes | `{ role: moderator\|superadmin\|null, reason }`. Serialised on a guard row; `409 LAST_SUPERADMIN` when it would remove the last superadmin; `403 REAUTH_REQUIRED` when the confirmation is old. |
+| `GET /admin/monitoring/summary` | staff | `{ queue_depth, oldest_open_task_age_seconds, escalated_open, expired_claims, open_reports, outbox_pending, denied_last_24h, generated_at }` |
+| `POST /reviews/{review_id}/reports` | member (CSRF) | `{ reason_code: spam\|offensive\|false_information\|privacy\|conflict_of_interest\|other, details? }` -> `201 { report_id, state, version }`. Only published reviews can be reported (`404` otherwise); `409 DUPLICATE_OPEN_REPORT`; `403` for your own review. |
+
+Denied attempts by staff (`403`) are written to the audit log as `denied.<action>`.
+
+### 5.19 Verification, enforcement, appeals and notifications (implemented 27 October 2026)
+
+Member routes need a session (writes: CSRF). Staff routes follow 5.18 (404 for non-staff, 403 for a lower role, lease and version checks, audit and outbox in one transaction).
+
+| Route | Who | Body and result |
+|---|---|---|
+| `GET /verifications/mine` | member | `{ verified_member, case: { id, state, version, statement, decision_note, evidence: [{id, status, content_type}] } \| null }` |
+| `POST /verifications` | member | `{ statement? }` -> `201` case. `409 VERIFICATION_ALREADY_OPEN`, `409 ALREADY_VERIFIED`, `403 ACCOUNT_RESTRICTED` |
+| `POST /verifications/{case_id}/evidence` | applicant | `{ content_type: image/jpeg\|image/png\|application/pdf, size_bytes <= 5 MB }` -> `{ evidence_id, upload_url }`; the browser `PUT`s the file to `upload_url` (one-time, private bucket). At most 3 files |
+| `POST /verifications/{case_id}/evidence/{evidence_id}/complete` | applicant | Confirms the file is in Storage -> `{ id, status: "uploaded" }`; `422` if it is not there |
+| `POST /verifications/{case_id}/respond` | applicant | `{ statement }` while `needs_clarification` -> back to `in_review` and the queue |
+| `POST /verifications/{case_id}/withdraw` | applicant | Withdraws an open case |
+| `POST /admin/verification-cases/{case_id}/transition` | staff holding the task | `{ to: in_review\|needs_clarification\|approved\|rejected\|escalated, expected_version, reason_code, note?, task_id, lease_token }`. Approval needs an uploaded file (`422 EVIDENCE_REQUIRED`); a question needs `note`; escalated cases are decided by a superadmin. Nobody decides their own case |
+| `POST /admin/verification-cases/{case_id}/evidence/{evidence_id}/url` | the staff member holding the case, or a superadmin | `{ url, expires_in: 60 }`; every view is audited as `evidence.viewed` |
+| `GET /admin/enforcement-cases?state=` | staff | Cases with their review or account and sanctions |
+| `POST /admin/enforcement-cases` | staff | `{ review_id \| user_id, reason_code, note?, emergency, counts_toward_rating, sanction?: { kind: warning\|posting_restriction\|suspension, ends_at? , review_on? } }` -> `201`. A review is taken down (hidden); an emergency gets a superadmin follow-up within 24 h; a suspension needs a superadmin and disables the account while active |
+| `POST /admin/enforcement-cases/{case_id}/actions` | staff (emergency: superadmin) | `{ action: remove\|restore\|close\|reverse_sanction, expected_version, reason_code, note?, counts_toward_rating?, sanction_id? }` |
+| `GET /appeals/mine` | member | `{ appeals: [...], appealable: [{ target_type, target_id, label, decided_at, deadline_at, open, appeal_state }] }` |
+| `POST /appeals` | member with standing | `{ target_type: moderation_action\|enforcement_case\|verification_case, target_id, reason }` -> `201`. Deadline: end of the 30th day after the decision, Asia/Dhaka (`409 APPEAL_WINDOW_CLOSED`); one appeal per decision (`409 DUPLICATE_APPEAL`, also after a decision; a withdrawn appeal may be filed again) |
+| `POST /appeals/{appeal_id}/withdraw` | appellant | While `received` or `in_review` |
+| `POST /admin/appeals/{appeal_id}/decision` | staff holding the task, not the original decider | `{ outcome: upheld\|overturned, expected_version, note, task_id, lease_token }`; `403 APPEAL_REVIEWER_NOT_INDEPENDENT`. Overturning restores a hidden review, sends a rejected review back to the queue, grants a rejected verification, or reverses an enforcement and its sanctions. The original decision is kept |
+| `GET /notifications?limit=&before=` | member | `{ items: [{ id, kind, critical, title {bn,en}, body {bn,en}, link, created_at, read }], unread }` |
+| `POST /notifications/{notification_id}/read`, `POST /notifications/read-all` | member | `{ unread }` |
+| `GET /notifications/stream` | member | Server-Sent Events: `unread` on connect, then one `notification` event per new item (within about 4 seconds of the decision). Lasts 5 minutes; `EventSource` reconnects |
+
+Delivery: the in-process worker relays `outbox_events` (claim with `FOR UPDATE SKIP LOCKED`, 2-minute lease, backoff, 6 tries) into `notifications`. Critical notices (account decisions) are emailed at once to the current verified address; the rest go into a daily digest at 08:00 Asia/Dhaka. `EMAIL_PROVIDER` is `mailpit` (local inbox), `resend` (production, with an idempotency key) or `none`. A send that may have been accepted before a crash is recorded `ambiguous` and is not resent automatically.
+
+### 5.20 Member reviews with photos and videos (implemented 27 October 2026)
+
+Owner decisions, 27 Oct 2026: any signed-in member (confirmed email) may attach media, not only Verified Members; video follows Review.md amendment A4 **without transcoding**. Guests stay text-only. Member routes need a session and the CSRF token.
+
+| Route | Who | Body and result |
+|---|---|---|
+| `POST /reviews/member` | member (CSRF), 20/hour | The 5.2 body without `guest_scope_secret`, `guest_display_name` and `turnstile_token`. The author and public name come from the session. `201 { review_id, status, version, duplicate_recovered }`; the same `client_draft_id` and receipt return `200` with `duplicate_recovered: true`. `409 MEMBER_REVIEW_EXISTS` for a second active review of the same destination and visit month |
+| `POST /reviews/{review_id}/media-intents` | the author, while the review is `PENDING`, 30/hour | `{ content_type: image/jpeg\|image/png\|image/webp\|video/mp4, size_bytes, alt_text (1-250), caption? (<=300), ownership_declared: true }` -> `201 { media_id, kind, upload_url, max_bytes }`. The browser `PUT`s the file to `upload_url` (one-time, private bucket `review-media`, `quarantine/`). At most 5 images (8 MiB each) and 1 video (50 MiB); field errors `TYPE`, `TOO_LARGE`, `TOO_MANY`. Someone else's review is `404`; after the moderator's decision `422 TRANSITION_NOT_ALLOWED` |
+| `POST /reviews/{review_id}/media/{media_id}/complete` | the author | The server reads the object: images must really be JPEG, PNG or WebP of at most 20 megapixels and are re-encoded to WebP (long edge <= 2048 px) with no EXIF/GPS; videos must be MP4 with H.264 video, AAC audio and at most 60 s, and their metadata boxes and extra tracks are blanked in place (no transcoding). `200 { id, kind, state: "pending", content_type, width, height, duration_ms, size_bytes }`. A bad file is deleted and answers `422` with field `file` and code `BROKEN`, `TYPE`, `TOO_MANY_PIXELS`, `TOO_LARGE`, `TOO_LONG`, `VIDEO_CODEC` or `NOT_UPLOADED` |
+| `POST /reviews/{review_id}/media/{media_id}/remove` | the author, while `PENDING` | `204`; deletes the objects and frees the place |
+| `POST /admin/submissions/{review_id}/media/{media_id}/url` | staff | `{ url, expires_in: 300 }` for the checked copy, to look before deciding |
+
+Moderation: the queue item of a review lists its pending media (`subject.media`). `POST /admin/submissions/{review_id}/moderation-actions` accepts `rejected_media_ids` (PUBLISH only): those are rejected and the rest approved; REJECT rejects all. The decision, the media states and the audit record (`metadata.media`) commit together. The public feed (5.8) adds `author_display_name` for member reviews and `media: [{ id, kind, content_type, url, alt_text, caption, width, height, duration_ms }]` with approved media only; `url` is a signed link valid for one hour. Uploads not completed within 24 hours are purged by the retention job.
+
 ## 6. Changes required in the current code
 
 The routes marked "Change required" in Section 4 differ from this contract as follows. Each item is a code defect, not a reason to change this contract.
@@ -624,7 +718,7 @@ The routes marked "Change required" in Section 4 differ from this contract as fo
 | `POST /reviews/{review_id}/media-intents` | Absent | Verified Member image upload intent | RV 8, amendment A1 |
 | `GET /staff/moderation/reviews` | Returns content (title, body, display name, overall and category ratings) since 20 Oct, but still a bare list capped at 100 without cursor | 5.9 | RV 9.3 |
 | `GET /health/ready` | Returns `status` only | Add `build` and `db_revision` | PF 22.1 |
-| CORS | `allow_credentials=false`; no `X-CSRF-Token` or `Accept-Language` header | Section 1.2, with the R04 authentication milestone | PF 16.1 |
+| CORS | ~~`allow_credentials=false`; no `X-CSRF-Token` header~~ Done 27 Oct 2026 (R04): `allow_credentials=true`, `X-CSRF-Token` allowed, origins an explicit list. `Accept-Language` is a CORS-safelisted header already | Section 1.2 | PF 16.1 |
 | Client address | ~~Uvicorn runs with `--proxy-headers` and `FORWARDED_ALLOW_IPS` defaulting to `*`~~ Done 19 Oct (WP5): `--no-proxy-headers`; `app/client_address.py` reads only the configured provider-appended entry; the forged-header test on staging is still outstanding (Gate A) | Provider-appended address only | PF 14.2 |
 
 ## 7. Rate limits
@@ -638,6 +732,10 @@ Limits are configuration values. Starting values (PF 14.3):
 | Guest removal requests | 3 per guest scope per 24 h | 20 per 24 h | Fresh Turnstile token |
 | Receipt operations | 20 per receipt digest per hour | 100 per hour | Progressive delay after repeated failures |
 | Pending guest reviews | 50 per destination, 500 total | n/a | Administrator alert at 80 % |
+| Sign-up | n/a | 10 per hour | Fresh Turnstile token |
+| Sign-in failures | 5 per email digest per 15 minutes | 100 per hour | Refused with `429` while exhausted; a wrong TOTP code or password in `/auth/reauth` also counts |
+| Password-reset and resend requests | 3 per email digest per hour | 30 per hour | Fresh Turnstile token on reset |
+| Email-link confirmations | n/a | 30 per hour | The one-time token is single use |
 
 The client address is the provider-appended entry only (PF 14.2). IPv6 is truncated to /64 and stored only as a keyed digest. Public reads and staff routes have independent limits. Hitting a pending ceiling returns `503 GUEST_WRITES_PAUSED` for guest submissions only.
 

@@ -86,6 +86,17 @@ function Series({ block, lang }: { block: SeriesBlock; lang: Lang }) {
   );
 }
 
+/** Table column keys from the providers; an unknown key is shown as sent. */
+const COLUMN_LABELS: Record<string, Record<Lang, string>> = {
+  status: { bn: 'অবস্থা', en: 'Status' },
+  count: { bn: 'সংখ্যা', en: 'Count' },
+  route: { bn: 'রুট', en: 'Route' },
+  role: { bn: 'ভূমিকা', en: 'Role' },
+  accounts: { bn: 'অ্যাকাউন্ট', en: 'Accounts' },
+};
+
+export const columnLabel = (column: string, lang: Lang): string => COLUMN_LABELS[column]?.[lang] ?? column;
+
 function Table({ block, lang }: { block: TableBlock; lang: Lang }) {
   return (
     <div className="table-wrap">
@@ -97,7 +108,7 @@ function Table({ block, lang }: { block: TableBlock; lang: Lang }) {
           <thead>
             <tr>
               {block.columns.map((column) => (
-                <th key={column}>{column}</th>
+                <th key={column}>{columnLabel(column, lang)}</th>
               ))}
             </tr>
           </thead>

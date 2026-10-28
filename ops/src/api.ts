@@ -5,7 +5,7 @@
  * gone when the tab closes. It is never put in a URL, a cookie or localStorage.
  */
 
-import type { Days, Overview, PanelData } from './types';
+import type { CatalogueEntry, Days, Overview, PanelData } from './types';
 
 const TOKEN_KEY = 'abhijatri_ops_token';
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/+$/, '');
@@ -58,6 +58,14 @@ async function request<T>(token: string, path: string, init: RequestInit = {}): 
     throw new OpsError(response.status, code);
   }
   return (await response.json()) as T;
+}
+
+export const getCatalogue = (token: string) => request<{ panels: CatalogueEntry[] }>(token, '/panels');
+
+/** Panels in catalogue order; a panel missing from the catalogue keeps its place after the rest. */
+export function orderByCatalogue(panels: PanelData[], catalogue: CatalogueEntry[]): PanelData[] {
+  const rank = new Map(catalogue.map((entry, index) => [entry.id, index]));
+  return [...panels].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
 }
 
 export const getOverview = (token: string, days: Days) => request<Overview>(token, `/overview?days=${days}`);
