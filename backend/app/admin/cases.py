@@ -24,7 +24,6 @@ from app.models import (
     ModerationActionRecord,
     ModerationDecision,
     ModerationTask,
-    OutboxEvent,
     Review,
     ReviewStatus,
     Sanction,
@@ -34,6 +33,7 @@ from app.models import (
     VerificationCase,
     VerificationEvidence,
 )
+from app.notify import events
 from app.services import ReviewError, moderate_review
 from app.storage import ALLOWED_TYPES, MAX_BYTES, StorageClient
 
@@ -80,7 +80,7 @@ def active_staff_ids(session: Session, *, exclude: uuid.UUID | None = None, role
 
 
 def emit(session: Session, topic: str, aggregate_id: uuid.UUID, payload: dict[str, Any]) -> None:
-    session.add(OutboxEvent(topic=topic, aggregate_id=aggregate_id, payload=payload))
+    events.emit(session, topic, aggregate_id, payload, aggregate_type=topic.split(".", 1)[0])
 
 
 def is_verified_member(session: Session, user_id: uuid.UUID) -> bool:
@@ -130,7 +130,7 @@ def open_verification(session: Session, applicant: Principal, statement: str | N
         raise ApiError("VERIFICATION_ALREADY_OPEN") from error
     tasks.ensure_task(session, "verification", case.id)
     audit.record(session, actor=applicant, action="verification.submitted", target_type="verification_case", target_id=case.id)
-    emit(session, "verification.submitted", case.id, {"case_id": str(case.id), "staff_recipients": active_staff_ids(session, exclude=applicant.user.id)})
+    emit(session, "verification.submitted", case.id, {"case_id": str(case.id), "applicant_id": str(applicant.user.id), "staff_recipients": active_staff_ids(session, exclude=applicant.user.id)})
     return case
 
 
@@ -256,7 +256,10 @@ def staff_verification_transition(
         session, actor=principal, action=f"verification.{to}", target_type="verification_case", target_id=case.id,
         reason=reason_code, metadata={"from": previous, "to": to, "version": case.version}, request_id=request_id,
     )
-    emit(session, "verification.state_changed", case.id, {"case_id": str(case.id), "state": to, "applicant_id": str(case.applicant_user_id)})
+    facts = {"case_id": str(case.id), "state": to, "applicant_id": str(case.applicant_user_id)}
+    if to == "needs_clarification":
+        facts["question"] = (note or "")[:300]  # meant for the applicant; moderator-only notes are never sent
+    emit(session, "verification.state_changed", case.id, facts)
     return {"case_id": str(case.id), "state": case.state, "version": case.version}
 
 
@@ -370,7 +373,7 @@ def open_enforcement(
     if emergency:  # an emergency takedown always gets a superadmin follow-up (spec 6.4)
         tasks.ensure_task(session, "enforcement", case.id, priority=2, required_role="superadmin")
     audit.record(session, actor=principal, action="enforcement.opened", target_type="enforcement_case", target_id=case.id, reason=reason_code, metadata={"kind": case.kind, "emergency": emergency, "review_id": str(review_id) if review_id else None, "user_id": str(user_id) if user_id else None}, request_id=request_id)
-    emit(session, "enforcement.opened", case.id, {"case_id": str(case.id), "subject_id": str(subject_id) if subject_id else None, "emergency": emergency, "staff_recipients": active_staff_ids(session, exclude=principal.user.id, roles=("superadmin",)) if emergency else []})
+    emit(session, "enforcement.opened", case.id, {"case_id": str(case.id), "kind": case.kind, "subject_id": str(subject_id) if subject_id else None, "emergency": emergency, "staff_recipients": active_staff_ids(session, exclude=principal.user.id, roles=("superadmin",)) if emergency else []})
     if sanction is not None:
         if subject_id is None:
             raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "sanction", "code": "NO_ACCOUNT"}])  # a guest review has no account
@@ -415,7 +418,7 @@ def reverse_sanction(session: Session, principal: Principal | None, sanction: Sa
     sanction.reversed_by = principal.user.id if principal else None
     _set_account_state(session, sanction.user_id)
     audit.record(session, actor=principal, action="sanction.expired" if expired else "sanction.reversed", target_type="user", target_id=sanction.user_id, metadata={"sanction_id": str(sanction.id)}, request_id=request_id)
-    emit(session, "sanction.ended", sanction.id, {"sanction_id": str(sanction.id), "user_id": str(sanction.user_id), "how": sanction.state})
+    emit(session, "sanction.ended", sanction.id, {"sanction_id": str(sanction.id), "user_id": str(sanction.user_id), "kind": sanction.kind, "how": sanction.state})
 
 
 def enforcement_action(
@@ -456,7 +459,7 @@ def enforcement_action(
             for task in session.scalars(select(ModerationTask).where(ModerationTask.subject_id == case.id, ModerationTask.status == "open").with_for_update()):
                 tasks.complete(task)
         audit.record(session, actor=principal, action=f"enforcement.{action}", target_type="enforcement_case", target_id=case.id, reason=reason_code, metadata={"from": previous, "to": case.state, "counts_toward_rating": case.counts_toward_rating}, request_id=request_id)
-        emit(session, "enforcement.state_changed", case.id, {"case_id": str(case.id), "state": case.state, "subject_id": str(case.subject_user_id or (review.author_user_id if review else None) or "")})
+        emit(session, "enforcement.state_changed", case.id, {"case_id": str(case.id), "kind": case.kind, "state": case.state, "subject_id": str(case.subject_user_id or (review.author_user_id if review else None) or "")})
     case.version += 1
     case.updated_at = _now()
     if note:

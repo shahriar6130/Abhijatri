@@ -24,7 +24,14 @@ from app import media
 from app.admin import audit
 from app.admin.cases import reverse_sanction
 from app.db import SessionLocal
-from app.models import Appeal, Notification, Sanction, VerificationCase, VerificationEvidence
+from app.models import (
+    Appeal,
+    Notification,
+    OutboxEvent,
+    Sanction,
+    VerificationCase,
+    VerificationEvidence,
+)
 from app.storage import StorageClient, StorageUnavailable, get_storage
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,7 @@ logger = logging.getLogger(__name__)
 OPEN_APPEAL = ("received", "in_review")
 STANDARD_DAYS = 90
 CRITICAL_DAYS = 730
+OUTBOX_DAYS = 30
 
 
 def purge_verification(sessions: Callable[[], Session], storage: StorageClient, now: datetime) -> dict[str, int]:
@@ -72,13 +80,28 @@ def purge_verification(sessions: Callable[[], Session], storage: StorageClient, 
 
 
 def purge_notifications(sessions: Callable[[], Session], now: datetime) -> int:
+    """Delete notifications past their own ``expires_at`` (90 days, critical 24 months), except those
+    linked to an appeal that is still open; that check is part of the same DELETE (spec 6.2)."""
     with sessions() as session:
         open_appeals = select(Appeal.id).where(Appeal.state.in_(OPEN_APPEAL))
         result = session.execute(
             delete(Notification).where(
-                ((Notification.critical.is_(False)) & (Notification.created_at < now - timedelta(days=STANDARD_DAYS)))
-                | ((Notification.critical.is_(True)) & (Notification.created_at < now - timedelta(days=CRITICAL_DAYS))),
+                Notification.expires_at < now,
                 (Notification.appeal_id.is_(None)) | (Notification.appeal_id.not_in(open_appeals)),
+            )
+        )
+        session.commit()
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
+def purge_outbox(sessions: Callable[[], Session], now: datetime) -> int:
+    """Processed or dead-lettered events older than 30 days that no remaining notification points to."""
+    with sessions() as session:
+        result = session.execute(
+            delete(OutboxEvent).where(
+                OutboxEvent.status.in_(("processed", "dead_letter")),
+                OutboxEvent.created_at < now - timedelta(days=OUTBOX_DAYS),
+                ~select(Notification.id).where(Notification.event_id == OutboxEvent.id).exists(),
             )
         )
         session.commit()
@@ -114,6 +137,7 @@ def run(sessions: Callable[[], Session] = SessionLocal, storage: StorageClient |
     result = purge_verification(sessions, store, moment)
     result["abandoned_media"] = purge_review_media(sessions, store, moment)
     result["notifications"] = purge_notifications(sessions, moment)
+    result["outbox_events"] = purge_outbox(sessions, moment)
     result["sanctions_expired"] = expire_sanctions(sessions, moment)
     return result
 

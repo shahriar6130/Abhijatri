@@ -19,6 +19,8 @@ from app.errors import ApiError, error_response, install_error_handlers
 from app.guest_tag import DISPLAY_PATTERN
 from app.limits import limiter
 from app.member_routes import router as member_router
+from app.notify.admin_routes import router as notification_admin_router
+from app.notify.webhooks import router as webhook_router
 from app.notify.worker import NotificationWorker
 from app.ops import events
 from app.ops.routes import router as ops_router
@@ -157,7 +159,7 @@ def create_app() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "PATCH"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Idempotency-Key", "Authorization", "X-CSRF-Token"],
         allow_credentials=True,  # cookie sessions (R04); origins stay an explicit list, never "*"
         max_age=600,
@@ -168,6 +170,8 @@ def create_app() -> FastAPI:
     application.include_router(auth_router)
     application.include_router(admin_router)
     application.include_router(reports_router)
+    application.include_router(notification_admin_router)
+    application.include_router(webhook_router)
     application.include_router(member_router)
     return application
 

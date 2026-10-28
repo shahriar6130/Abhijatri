@@ -137,6 +137,15 @@ class Settings(BaseSettings):
     notify_worker_enabled: bool = True
     notify_poll_seconds: float = Field(default=2.0, gt=0, le=60)
     digest_hour: int = Field(default=8, ge=0, le=23)  # local hour of the daily digest
+    # Notification spec v1.1 (Docs/Notification-Documentation.md).
+    staff_base_url: str = "http://localhost:5175"  # links in staff notices and emails
+    resend_webhook_secret: str | None = Field(default=None, repr=False)  # "whsec_..." from Resend
+    brevo_webhook_token: str | None = Field(default=None, repr=False)  # bearer token configured on the Brevo webhook
+    notify_scan_seconds: float = Field(default=60.0, gt=0, le=3600)  # alert and reminder scanners
+    notify_failure_alert_per_hour: int = Field(default=5, ge=1)
+    notify_backlog_alert_minutes: int = Field(default=10, ge=1)
+    notify_webhook_anomaly_per_hour: int = Field(default=5, ge=1)
+    notify_queue_overdue_hours: int = Field(default=24, ge=1)
 
     @property
     def email_from_address(self) -> str:

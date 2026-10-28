@@ -210,7 +210,7 @@ def transition_report(
         OutboxEvent(
             topic="report.state_changed",
             aggregate_id=report.id,
-            payload={"report_id": str(report.id), "state": to, "version": report.version},
+            payload={"report_id": str(report.id), "state": to, "version": report.version, "reporter_id": str(report.reporter_user_id)},
         )
     )
     return {"report_id": str(report.id), "state": report.state, "version": report.version}

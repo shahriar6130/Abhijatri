@@ -17,6 +17,7 @@ from app.admin import audit
 from app.auth.sessions import Principal
 from app.errors import ApiError
 from app.models import RoleAdminGuard, User, UserRole
+from app.notify import events
 
 ROLES = ("moderator", "superadmin")
 
@@ -75,5 +76,14 @@ def set_staff_role(
         reason=reason,
         metadata={"from": previous, "to": role},
         request_id=request_id,
+    )
+    events.emit(
+        session,
+        "staff.role_changed",
+        target_user_id,
+        {"target_id": str(target_user_id), "from": previous, "role": role or "none", "granted": "true" if role else "false"},
+        aggregate_type="user",
+        staff_roles=("superadmin",),
+        exclude=actor.user.id if actor else None,
     )
     return granted

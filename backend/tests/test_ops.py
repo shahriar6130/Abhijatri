@@ -140,7 +140,7 @@ def test_overview_returns_every_panel_in_the_shared_shape_without_identifiers(
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     body = response.json()
-    assert {panel["id"] for panel in body["panels"]} == {"visitors", "content", "reviews", "traffic", "health", "members"}
+    assert {panel["id"] for panel in body["panels"]} == {"visitors", "content", "reviews", "traffic", "health", "members", "notifications"}
     for panel in body["panels"]:
         _assert_panel_shape(panel)
         assert panel["status"] != "unavailable", panel

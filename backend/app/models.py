@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -23,6 +23,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    Time,
     UniqueConstraint,
     event,
     func,
@@ -603,7 +604,15 @@ class ModerationActionRecord(Base):
 
 
 class OutboxEvent(Base):
+    """The shared outbox (Notification spec 7.1; Moderation spec 6.7). ``topic`` is the event type.
+
+    ``available_at`` is the spec's ``next_attempt_at`` and ``lease_until`` its ``lease_expires_at``.
+    """
+
     __tablename__ = "outbox_events"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'processing', 'processed', 'retry', 'dead_letter')", name="ck_outbox_events_status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     topic: Mapped[str] = mapped_column(String(100), nullable=False)  # the event type, e.g. review.state_changed
@@ -618,6 +627,14 @@ class OutboxEvent(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now())
     last_error: Mapped[str | None] = mapped_column(String(300))
+    # Notification spec 7.1 (migration 0017).
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, default=lambda: f"event:{uuid.uuid4()}")
+    aggregate_type: Mapped[str | None] = mapped_column(String(40))
+    aggregate_version: Mapped[int | None] = mapped_column(BigInteger)
+    recipient_policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=func.now())
+    lease_owner: Mapped[str | None] = mapped_column(String(80))
+    last_error_code: Mapped[str | None] = mapped_column(String(60))
 
 
 class AuditEvent(Base):
@@ -888,49 +905,229 @@ class Appeal(Base):
 
 
 class Notification(Base):
-    """One in-app notification for one person from one outbox event (spec 6.7, 11).
+    """One durable in-app item per recipient and notification kind (Notification spec 7.2).
 
     ``(event_id, recipient_user_id, kind)`` is unique, so re-processing an event never duplicates it.
+    Texts are stored in both languages. ``audience = 'staff'`` items are shown only while the
+    recipient still holds a staff role (spec 5). ``delivery_mode`` says how email follows it.
     """
 
     __tablename__ = "notifications"
     __table_args__ = (
         UniqueConstraint("event_id", "recipient_user_id", "kind", name="uq_notifications_identity"),
-        CheckConstraint("email_status IN ('none', 'pending', 'sent', 'failed', 'ambiguous', 'digest')", name="ck_notifications_email_status"),
+        CheckConstraint("priority IN ('critical', 'high', 'normal', 'low')", name="ck_notifications_priority"),
+        CheckConstraint("audience IN ('member', 'staff')", name="ck_notifications_audience"),
+        CheckConstraint("delivery_mode IN ('immediate', 'digest', 'none')", name="ck_notifications_delivery_mode"),
         Index("ix_notifications_recipient_created", "recipient_user_id", "created_at"),
+        Index("ix_notifications_expires_at", "expires_at"),
+        Index("ix_notifications_digest_queue", "delivery_mode", "digest_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outbox_events.id", ondelete="CASCADE"), nullable=False)
     recipient_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     kind: Mapped[str] = mapped_column(String(60), nullable=False)
-    critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    priority: Mapped[str] = mapped_column(String(8), nullable=False, default="normal", server_default="normal")
+    audience: Mapped[str] = mapped_column(String(8), nullable=False, default="member", server_default="member")
+    template_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    template_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     title_bn: Mapped[str] = mapped_column(String(160), nullable=False)
     title_en: Mapped[str] = mapped_column(String(160), nullable=False)
     body_bn: Mapped[str] = mapped_column(String(600), nullable=False)
     body_en: Mapped[str] = mapped_column(String(600), nullable=False)
-    link: Mapped[str | None] = mapped_column(String(300))
+    link: Mapped[str | None] = mapped_column(String(300))  # an allowlisted internal route, never a free URL
     appeal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # kept while that appeal is open (spec 10)
-    email_status: Mapped[str] = mapped_column(String(10), nullable=False, default="none", server_default="none")
-    email_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+    delivery_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="none", server_default="none")
+    digest_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("notification_digests.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    @property
+    def critical(self) -> bool:
+        return self.priority == "critical"
 
 
-class DeliveryAttempt(Base):
-    """History of each email attempt; an accepted-then-crashed send is ``ambiguous``, never ``failed`` (spec 6.7)."""
+class NotificationDigest(Base):
+    """One daily summary per recipient and local day (spec 7.10); its items point back with ``digest_id``."""
 
-    __tablename__ = "delivery_attempts"
-    __table_args__ = (CheckConstraint("status IN ('sent', 'failed', 'ambiguous')", name="ck_delivery_attempts_status"),)
+    __tablename__ = "notification_digests"
+    __table_args__ = (
+        UniqueConstraint("recipient_user_id", "window_date", name="uq_notification_digests_window"),
+        CheckConstraint("status IN ('queued', 'sending', 'accepted', 'failed', 'ambiguous')", name="ck_notification_digests_status"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    notification_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False, index=True)
-    channel: Mapped[str] = mapped_column(String(10), nullable=False, default="email")
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    window_date: Mapped[date] = mapped_column(Date, nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="queued", server_default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class NotificationDelivery(Base):
+    """One external (email) delivery of a notification or of a digest (spec 7.3).
+
+    "accepted" means the provider took the message, not that it reached the inbox. ``destination_ref``
+    is an HMAC of the address used, never the address itself.
+    """
+
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'sending', 'accepted', 'delivered', 'bounced', 'failed_permanently', 'skipped', 'ambiguous')",
+            name="ck_notification_deliveries_status",
+        ),
+        CheckConstraint("num_nonnulls(notification_id, digest_id) = 1", name="ck_notification_deliveries_subject"),
+        UniqueConstraint("notification_id", "channel", name="uq_notification_deliveries_notification"),
+        UniqueConstraint("digest_id", "channel", name="uq_notification_deliveries_digest"),
+        Index("ix_notification_deliveries_due", "status", "next_attempt_at"),
+        Index("ix_notification_deliveries_message", "provider_message_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("notifications.id", ondelete="CASCADE"))
+    digest_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("notification_digests.id", ondelete="CASCADE"))
+    channel: Mapped[str] = mapped_column(String(10), nullable=False, default="email", server_default="email")
+    destination_ref: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", server_default="queued")
+    attempt_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str | None] = mapped_column(String(20))
+    provider_message_id: Mapped[str | None] = mapped_column(String(200))
+    last_error_code: Mapped[str | None] = mapped_column(String(60))
+    last_error_summary: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class NotificationDeliveryAttempt(Base):
+    """Append-only history of every send attempt (spec 7.4)."""
+
+    __tablename__ = "notification_delivery_attempts"
+    __table_args__ = (
+        UniqueConstraint("delivery_id", "attempt_number", name="uq_notification_delivery_attempts_number"),
+        CheckConstraint(
+            "outcome IN ('accepted', 'transient_failure', 'permanent_failure', 'ambiguous', 'skipped')",
+            name="ck_notification_delivery_attempts_outcome",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    delivery_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("notification_deliveries.id", ondelete="CASCADE"), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(200))
+    error_class: Mapped[str | None] = mapped_column(String(40))
+    error_code: Mapped[str | None] = mapped_column(String(60))
+    redacted_error_summary: Mapped[str | None] = mapped_column(String(300))
+
+
+class NotificationProviderEvent(Base):
+    """A provider callback, stored once per ``(provider, provider_event_id)`` (spec 7.5)."""
+
+    __tablename__ = "notification_provider_events"
+    __table_args__ = (UniqueConstraint("provider", "provider_event_id", name="uq_notification_provider_events"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(String(10), nullable=False)
-    provider_message_id: Mapped[str | None] = mapped_column(String(120))
-    error: Mapped[str | None] = mapped_column(String(300))
-    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    provider_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    delivery_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("notification_deliveries.id", ondelete="SET NULL"))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    redacted_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class NotificationTemplate(Base):
+    """A versioned text for one template key, channel and language (spec 7.6). Active versions are immutable."""
+
+    __tablename__ = "notification_templates"
+    __table_args__ = (
+        UniqueConstraint("template_key", "channel", "locale", "version", name="uq_notification_templates_version"),
+        CheckConstraint("channel IN ('in_app', 'email')", name="ck_notification_templates_channel"),
+        CheckConstraint("locale IN ('bn', 'en')", name="ck_notification_templates_locale"),
+        CheckConstraint("status IN ('draft', 'active', 'retired')", name="ck_notification_templates_status"),
+        Index(
+            "uq_notification_templates_active", "template_key", "channel", "locale", unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    template_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    channel: Mapped[str] = mapped_column(String(10), nullable=False)
+    locale: Mapped[str] = mapped_column(String(5), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subject_template: Mapped[str | None] = mapped_column(String(200))
+    title_template: Mapped[str | None] = mapped_column(String(160))
+    body_template: Mapped[str] = mapped_column(String(600), nullable=False)
+    variable_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="draft", server_default="draft")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))  # null: shipped with the code
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationRule(Base):
+    """Live configuration of one catalogue rule (spec 7.7): priority, channels and on/off.
+
+    Which events and recipient resolvers exist is fixed in code (``app/notify/registry.py``); this
+    table only tunes allowlisted fields of those rules.
+    """
+
+    __tablename__ = "notification_rules"
+    __table_args__ = (
+        CheckConstraint("priority IN ('critical', 'high', 'normal', 'low')", name="ck_notification_rules_priority"),
+    )
+
+    template_key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    priority: Mapped[str] = mapped_column(String(8), nullable=False)
+    email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class NotificationPreference(Base):
+    """How a person wants standard (non-critical) email (spec 7.8)."""
+
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        CheckConstraint("standard_email_mode IN ('immediate', 'digest', 'off')", name="ck_notification_preferences_mode"),
+    )
+
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    standard_email_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="digest", server_default="digest")
+    digest_timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Dhaka", server_default="Asia/Dhaka")
+    digest_local_time: Mapped[time] = mapped_column(Time, nullable=False, default=time(8, 0), server_default="08:00")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class NotificationSuppression(Base):
+    """An address that must not be emailed (bounce, complaint, or by hand), kept as an HMAC (spec 7.9)."""
+
+    __tablename__ = "notification_suppressions"
+    __table_args__ = (
+        Index(
+            "uq_notification_suppressions_active", "destination_hmac", "channel", unique=True,
+            postgresql_where=text("removed_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    destination_hmac: Mapped[str] = mapped_column(String(64), nullable=False)
+    channel: Mapped[str] = mapped_column(String(10), nullable=False, default="email")
+    reason_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    removed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removal_reason: Mapped[str | None] = mapped_column(String(300))
 
 
 class RateLimitBucket(Base):

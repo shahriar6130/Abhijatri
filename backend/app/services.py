@@ -34,6 +34,7 @@ from app.models import (
     User,
     Verification,
 )
+from app.notify import events
 from app.schemas import CategoryAverage, GuestReviewCreate, MemberReviewCreate, ReviewContent
 
 
@@ -593,17 +594,21 @@ def moderate_review(
             request_id=request_id,
         )
     )
-    session.add(
-        OutboxEvent(
-            topic="review.state_changed",
-            aggregate_id=review.id,
-            payload={
-                "review_id": str(review.id),
-                "destination_id": str(review.destination_id),
-                "status": review.status.value,
-                "version": review.version,
-            },
-        )
+    events.emit(
+        session,
+        "review.state_changed",
+        review.id,
+        {
+            "review_id": str(review.id),
+            "destination_id": str(review.destination_id),
+            "status": review.status.value,
+            "decision": decision.value,
+            "author_id": str(review.author_user_id) if review.author_user_id else None,
+            "version": review.version,
+        },
+        aggregate_type="review",
+        aggregate_version=review.version,
+        dedupe_key=f"review.state_changed:{review.id}:{review.version}",
     )
     return review
 

@@ -374,6 +374,38 @@ def apply_decision(
     return outcome
 
 
+def change_decision(session: Session, media_id: uuid.UUID, approve: bool, actor_id: uuid.UUID) -> tuple[ReviewMedia, str]:
+    """Correct a photo or video decision after the review was decided. Returns the item and its old state.
+
+    Pending items are decided with their review (the queue); removed or unprocessed items cannot be shown."""
+    item = session.scalar(select(ReviewMedia).where(ReviewMedia.id == media_id).with_for_update())
+    if item is None:
+        raise ApiError("NOT_FOUND")
+    if item.state not in ("approved", "rejected") or item.processed_key is None:
+        raise ApiError("TRANSITION_NOT_ALLOWED")
+    previous = item.state
+    item.state = "approved" if approve else "rejected"
+    item.decided_by, item.decided_at = actor_id, datetime.now(UTC)
+    return item, previous
+
+
+def staff_list(session: Session, state: str | None, limit: int) -> list[dict[str, Any]]:
+    """Decided and pending media, newest first, with the review they belong to."""
+    statement = (
+        select(ReviewMedia, Review.status, Review.destination_id)
+        .join(Review, Review.id == ReviewMedia.review_id)
+        .where(ReviewMedia.state.in_(("pending", "approved", "rejected")))
+        .order_by(ReviewMedia.created_at.desc())
+        .limit(limit)
+    )
+    if state:
+        statement = statement.where(ReviewMedia.state == state)
+    return [
+        describe(item) | {"review_id": str(item.review_id), "review_status": status.value, "destination_id": str(destination_id), "decided_at": item.decided_at.isoformat() if item.decided_at else None}
+        for item, status, destination_id in session.execute(statement).all()
+    ]
+
+
 def describe(item: ReviewMedia, url: str | None = None) -> dict[str, Any]:
     return {
         "id": str(item.id),

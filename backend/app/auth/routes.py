@@ -33,6 +33,8 @@ from app.config import get_settings
 from app.db import get_session
 from app.destination_services import today_in_display_tz
 from app.errors import ApiError
+from app.models import User
+from app.notify import events
 from app.redis_client import RedisDep
 from app.turnstile import ACTION_AUTH_REGISTER, ACTION_AUTH_RESET, TurnstileDep
 
@@ -296,7 +298,9 @@ def password_reset_request(
 
 
 @router.post("/password-reset/confirm")
-def password_reset_confirm(request: Request, payload: ResetConfirmRequest, sessions: abuse.CounterSessions, gotrue: GoTrue) -> dict[str, str]:
+def password_reset_confirm(
+    request: Request, payload: ResetConfirmRequest, sessions: abuse.CounterSessions, gotrue: GoTrue, session: DbSession
+) -> dict[str, str]:
     abuse.enforce(sessions, abuse.token_confirm_checks(get_settings(), network_digest(request)))
     validation.validate_new_password(payload.new_password)  # before the one-time token is spent
     try:
@@ -310,7 +314,21 @@ def password_reset_confirm(request: Request, payload: ResetConfirmRequest, sessi
         _provider(gotrue.sign_out, tokens.access_token)
     except (GoTrueError, ApiError):
         logger.info("could not revoke sessions after a password reset")
+    _security_notice(session, tokens.access_token)
     return {"status": "password_changed"}
+
+
+def _security_notice(session: Session, access_token: str) -> None:
+    """Tell the account holder their password changed (Notification spec 3, security notice). Best effort."""
+    try:
+        user_id = verify_access_token(access_token).user_id
+        if session.get(User, user_id) is None:
+            return  # never signed in here yet: no inbox to write to
+        events.emit(session, "security.password_changed", user_id, {"user_id": str(user_id)}, aggregate_type="user")
+        session.commit()
+    except Exception:  # noqa: BLE001 - the password change itself already succeeded
+        session.rollback()
+        logger.warning("password-change notice was not queued")
 
 
 # ---- session, CSRF, MFA, re-authentication ----

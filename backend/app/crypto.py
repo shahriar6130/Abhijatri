@@ -16,6 +16,7 @@ from app.config import get_settings
 RECEIPT_LABEL = "abhijatri:review-receipt:v1"
 GUEST_SCOPE_LABEL = "abhijatri:guest-scope:v1"
 NETWORK_LABEL = "abhijatri:network:v1"
+EMAIL_DESTINATION_LABEL = "abhijatri:email-destination:v1"  # notification suppressions and delivery refs
 LEGACY_KEY_ID = "legacy"
 
 RECEIPT_PREFIX = "abr1_"

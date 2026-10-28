@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from app.admin import audit
 from app.auth.sessions import Principal
 from app.errors import ApiError
-from app.models import ModerationTask
+from app.models import ModerationTask, UserRole
+from app.notify import events
 
 LEASE_SECONDS = 300
 
@@ -144,6 +145,51 @@ def escalate(
     task.updated_at = _now()
     audit.record(
         session, actor=principal, action="task.escalated", target_type="task", target_id=task.id, reason=reason, request_id=request_id
+    )
+    events.emit(
+        session, "task.escalated", task.id,
+        {"task_id": str(task.id), "task_type": task.task_type, "holder_id": str(principal.user.id)},
+        aggregate_type="task", aggregate_version=task.version, staff_roles=("superadmin",), exclude=principal.user.id,
+    )
+    return task
+
+
+def assign(
+    session: Session, principal: Principal, task_id: uuid.UUID, assignee_id: uuid.UUID | None, *, request_id: str | None = None
+) -> ModerationTask:
+    """A superadmin gives an open task to one staff member (or back to the shared queue with None).
+
+    Only the assignee (or a superadmin) can then claim it. The assignee and the previous assignee are
+    told (spec 3: task assigned / unassigned / appeal assigned)."""
+    if principal.role != "superadmin":
+        raise ApiError("FORBIDDEN")
+    task = _locked(session, task_id)
+    if task.status != "open":
+        raise ApiError("TASK_NOT_AVAILABLE")
+    if assignee_id is not None:
+        role = session.scalar(select(UserRole.role).where(UserRole.user_id == assignee_id, UserRole.revoked_at.is_(None)))
+        if role is None or (task.required_role == "superadmin" and role != "superadmin"):
+            raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "user_id", "code": "NOT_ELIGIBLE"}])
+    previous = task.assigned_to
+    if previous == assignee_id:
+        return task
+    task.assigned_to = assignee_id
+    task.version += 1
+    task.updated_at = _now()
+    audit.record(
+        session, actor=principal, action="task.assigned", target_type="task", target_id=task.id, request_id=request_id,
+        metadata={"from": str(previous) if previous else None, "to": str(assignee_id) if assignee_id else None},
+    )
+    events.emit(
+        session, "task.assigned", task.id,
+        {
+            "task_id": str(task.id),
+            "task_type": task.task_type,
+            "assignee_id": str(assignee_id) if assignee_id else None,
+            "previous_id": str(previous) if previous else None,
+            "reference": str(task.subject_id)[:8],
+        },
+        aggregate_type="task", aggregate_version=task.version,
     )
     return task
 

@@ -385,3 +385,34 @@ def test_abandoned_uploads_are_purged_after_a_day(client: TestClient, postgres_s
     assert retention.run(sessions, storage, datetime.now(UTC) + timedelta(hours=25))["abandoned_media"] == 1  # type: ignore[arg-type]
     postgres_session.expire_all()
     assert postgres_session.scalar(select(ReviewMedia)) is None and storage.deleted
+
+
+@pytest.mark.integration
+def test_staff_can_correct_a_media_decision_and_it_is_audited(
+    client: TestClient, postgres_session: Session, fake: support.FakeGoTrue, storage: MediaStorage
+) -> None:
+    destination = _destination(postgres_session)
+    nila = admin.staff_client(client, postgres_session, fake, "nila@example.com", None, "203.0.113.160", aal="aal1")
+    review_id = _member_review(nila, destination)
+    photo = _attach(nila, storage, review_id, jpeg_with_location(), "image/jpeg").json()
+    mod = admin.staff_client(client, postgres_session, fake, "mod@example.com", "moderator", "203.0.113.161")
+    task = postgres_session.scalar(select(ModerationTask).where(ModerationTask.subject_id == uuid.UUID(review_id)))
+    review = postgres_session.get(Review, uuid.UUID(review_id))
+    assert task is not None and review is not None
+    assert mod.post(f"{BASE}/media/{photo['id']}/decision", json={"decision": "approve", "reason_code": "fix"}).status_code == 422, "pending media go with the review"
+    lease = admin._claim(mod, task)["lease_token"]  # noqa: SLF001
+    published = mod.post(
+        f"{BASE}/submissions/{review_id}/moderation-actions",
+        json=admin._decision(task, lease, review, rejected_media_ids=[photo["id"]]),  # noqa: SLF001
+    )
+    assert published.status_code == 200
+    assert client.get(f"/api/v1/destinations/{destination.id}/reviews").json()["items"][0]["media"] == []
+
+    listed = mod.get(f"{BASE}/media", params={"state": "rejected"}).json()["items"]
+    assert [m["id"] for m in listed] == [photo["id"]] and listed[0]["review_status"] == "PUBLISHED"
+    fixed = mod.post(f"{BASE}/media/{photo['id']}/decision", json={"decision": "approve", "reason_code": "ticked-by-mistake"})
+    assert fixed.status_code == 200 and fixed.json()["state"] == "approved"
+    assert len(client.get(f"/api/v1/destinations/{destination.id}/reviews").json()["items"][0]["media"]) == 1
+    event = postgres_session.scalar(select(AuditEvent).where(AuditEvent.action == "media.approve"))
+    assert event is not None and event.event_metadata == {"from": "rejected", "to": "approved", "review_id": review_id}
+    assert nila.post(f"{BASE}/media/{photo['id']}/decision", json={"decision": "reject", "reason_code": "x1"}).status_code == 404, "members never see staff routes"

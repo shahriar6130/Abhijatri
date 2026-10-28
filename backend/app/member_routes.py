@@ -7,17 +7,20 @@ within a few seconds without polling from the browser.
 """
 
 import asyncio
+import base64
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
+from datetime import time as dt_time
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, update
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import media
@@ -26,7 +29,14 @@ from app.auth.sessions import MemberPrincipal, Principal, require_csrf
 from app.db import SessionLocal, get_session
 from app.errors import ApiError
 from app.limits import limiter
-from app.models import Appeal, Notification, VerificationCase, VerificationEvidence
+from app.models import (
+    Appeal,
+    Notification,
+    NotificationPreference,
+    UserRole,
+    VerificationCase,
+    VerificationEvidence,
+)
 from app.ops import events
 from app.schemas import (
     GuestReviewCreated,
@@ -240,66 +250,179 @@ def withdraw_appeal(appeal_id: uuid.UUID, principal: Writer, session: DbSession)
     return _appeal_view(_commit(session, lambda: cases.withdraw_appeal(session, principal, appeal_id)))
 
 
-# ---- notifications ----
+# ---- notifications (Notification spec 9 "Member inbox") ----
+
+
+class NotificationPatch(_Body):
+    read: bool | None = None
+    archived: bool | None = None
+
+
+class PreferencesBody(_Body):
+    standard_email_mode: str = Field(pattern="^(immediate|digest|off)$")
+    digest_timezone: str = Field(min_length=1, max_length=64)
+    digest_local_time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    @field_validator("digest_timezone")
+    @classmethod
+    def known_zone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError("not an IANA time zone") from error
+        return value
 
 
 def _notification_view(n: Notification) -> dict[str, Any]:
     return {
         "id": str(n.id),
         "kind": n.kind,
+        "category": n.kind.split(".", 1)[0],
+        "priority": n.priority,
         "critical": n.critical,
+        "audience": n.audience,
         "title": {"bn": n.title_bn, "en": n.title_en},
         "body": {"bn": n.body_bn, "en": n.body_en},
         "link": n.link,
         "created_at": n.created_at.isoformat(),
         "read": n.read_at is not None,
+        "archived": n.archived_at is not None,
     }
 
 
-def _unread(session: Session, user_id: uuid.UUID) -> int:
-    return session.scalar(select(func.count()).select_from(Notification).where(Notification.recipient_user_id == user_id, Notification.read_at.is_(None))) or 0
+def _visible(user_id: uuid.UUID, is_staff: bool) -> Any:
+    """Own rows only; staff notices only while the person still holds a staff role (spec 5)."""
+    condition = Notification.recipient_user_id == user_id
+    return condition if is_staff else and_(condition, Notification.audience == "member")
+
+
+def _is_staff(session: Session, user_id: uuid.UUID) -> bool:
+    return session.scalar(select(UserRole.id).where(UserRole.user_id == user_id, UserRole.revoked_at.is_(None))) is not None
+
+
+def _unread(session: Session, user_id: uuid.UUID, is_staff: bool) -> int:
+    return session.scalar(
+        select(func.count()).select_from(Notification).where(_visible(user_id, is_staff), Notification.read_at.is_(None), Notification.archived_at.is_(None))
+    ) or 0
+
+
+def _cursor(n: Notification) -> str:
+    return base64.urlsafe_b64encode(f"{n.created_at.isoformat()}|{n.id}".encode()).decode("ascii").rstrip("=")
+
+
+def _decode(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode("utf-8")
+        moment, notification_id = raw.rsplit("|", 1)
+        return datetime.fromisoformat(moment), uuid.UUID(notification_id)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ApiError("INVALID_CURSOR") from error
 
 
 @router.get("/notifications")
 def notifications(
-    principal: MemberPrincipal, session: DbSession, limit: Annotated[int, Query(ge=1, le=50)] = 20, before: datetime | None = None
+    principal: MemberPrincipal,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+    archived: bool = False,
+    unread_only: bool = False,
 ) -> dict[str, Any]:
-    statement = select(Notification).where(Notification.recipient_user_id == principal.user.id).order_by(Notification.created_at.desc()).limit(limit)
-    if before:
-        statement = statement.where(Notification.created_at < before)
-    return {"items": [_notification_view(n) for n in session.scalars(statement)], "unread": _unread(session, principal.user.id)}
-
-
-@router.post("/notifications/{notification_id}/read")
-def read_notification(notification_id: uuid.UUID, principal: Writer, session: DbSession) -> dict[str, int]:
-    changed = session.execute(
-        update(Notification)
-        .where(Notification.id == notification_id, Notification.recipient_user_id == principal.user.id, Notification.read_at.is_(None))
-        .values(read_at=datetime.now(UTC))
+    is_staff = principal.role is not None
+    statement = (
+        select(Notification)
+        .where(_visible(principal.user.id, is_staff), Notification.archived_at.is_not(None) if archived else Notification.archived_at.is_(None))
+        .order_by(Notification.created_at.desc(), Notification.id.desc())
+        .limit(limit + 1)
     )
-    session.commit()
-    if not changed.rowcount and session.scalar(select(Notification.id).where(Notification.id == notification_id, Notification.recipient_user_id == principal.user.id)) is None:  # type: ignore[attr-defined]
+    if unread_only:
+        statement = statement.where(Notification.read_at.is_(None))
+    if cursor:
+        moment, last_id = _decode(cursor)
+        statement = statement.where(or_(Notification.created_at < moment, and_(Notification.created_at == moment, Notification.id < last_id)))
+    rows = list(session.scalars(statement))
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [_notification_view(n) for n in rows],
+        "next_cursor": _cursor(rows[-1]) if more and rows else None,
+        "unread": _unread(session, principal.user.id, is_staff),
+    }
+
+
+@router.get("/notifications/unread-count")
+def unread_count(principal: MemberPrincipal, session: DbSession) -> dict[str, int]:
+    return {"unread": _unread(session, principal.user.id, principal.role is not None)}
+
+
+@router.patch("/notifications/{notification_id}")
+def update_notification(notification_id: uuid.UUID, body: NotificationPatch, principal: Writer, session: DbSession) -> dict[str, Any]:
+    """Mark read/unread or archive/unarchive one of your own notifications. Nothing else can change."""
+    is_staff = principal.role is not None
+    row = session.scalar(select(Notification).where(Notification.id == notification_id, _visible(principal.user.id, is_staff)).with_for_update())
+    if row is None:
         raise ApiError("NOT_FOUND")
-    return {"unread": _unread(session, principal.user.id)}
+    now = datetime.now(UTC)
+    if body.read is not None:
+        row.read_at = (row.read_at or now) if body.read else None
+    if body.archived is not None:
+        row.archived_at = (row.archived_at or now) if body.archived else None
+    session.commit()
+    return _notification_view(row) | {"unread": _unread(session, principal.user.id, is_staff)}
 
 
-@router.post("/notifications/read-all")
-def read_all(principal: Writer, session: DbSession) -> dict[str, int]:
-    session.execute(update(Notification).where(Notification.recipient_user_id == principal.user.id, Notification.read_at.is_(None)).values(read_at=datetime.now(UTC)))
+@router.post("/notifications/mark-all-read")
+def mark_all_read(principal: Writer, session: DbSession) -> dict[str, int]:
+    is_staff = principal.role is not None
+    session.execute(
+        update(Notification).where(_visible(principal.user.id, is_staff), Notification.read_at.is_(None)).values(read_at=datetime.now(UTC))
+    )
     session.commit()
     return {"unread": 0}
 
 
+def _preference_view(pref: NotificationPreference | None) -> dict[str, Any]:
+    return {
+        "standard_email_mode": pref.standard_email_mode if pref else "digest",
+        "digest_timezone": pref.digest_timezone if pref else "Asia/Dhaka",
+        "digest_local_time": pref.digest_local_time.strftime("%H:%M") if pref else "08:00",
+        "always_immediate": ["critical", "high"],  # never delayed or switched off by a preference
+    }
+
+
+@router.get("/notification-preferences")
+def get_preferences(principal: MemberPrincipal, session: DbSession) -> dict[str, Any]:
+    return _preference_view(session.get(NotificationPreference, principal.user.id))
+
+
+@router.put("/notification-preferences")
+def put_preferences(body: PreferencesBody, principal: Writer, session: DbSession) -> dict[str, Any]:
+    pref = session.get(NotificationPreference, principal.user.id) or NotificationPreference(recipient_user_id=principal.user.id)
+    pref.standard_email_mode = body.standard_email_mode
+    pref.digest_timezone = body.digest_timezone
+    pref.digest_local_time = dt_time.fromisoformat(body.digest_local_time)
+    pref.updated_at = datetime.now(UTC)
+    session.add(pref)
+    session.commit()
+    return _preference_view(pref)
+
+
 def _newer(user_id: uuid.UUID, since: datetime) -> tuple[list[dict[str, Any]], int, datetime]:
     with SessionLocal() as session:
-        rows = list(session.scalars(select(Notification).where(Notification.recipient_user_id == user_id, Notification.created_at > since).order_by(Notification.created_at)))
+        is_staff = _is_staff(session, user_id)
+        rows = list(
+            session.scalars(
+                select(Notification).where(_visible(user_id, is_staff), Notification.created_at > since).order_by(Notification.created_at)
+            )
+        )
         latest = rows[-1].created_at if rows else since
-        return [_notification_view(n) for n in rows], _unread(session, user_id), latest
+        return [_notification_view(n) for n in rows], _unread(session, user_id, is_staff), latest
 
 
 @router.get("/notifications/stream")
 async def notification_stream(request: Request, principal: MemberPrincipal) -> StreamingResponse:
-    """Live notifications as Server-Sent Events. The connection lasts 5 minutes; `EventSource` reconnects."""
+    """Live notifications as Server-Sent Events: a best-effort signal, the inbox stays the source of truth
+    (spec 1, 10). The connection lasts 5 minutes; `EventSource` reconnects and the page refetches."""
     user_id = principal.user.id
 
     async def events() -> AsyncIterator[str]:

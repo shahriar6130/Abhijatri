@@ -82,7 +82,9 @@ class GoTrueClient:
             body = response.json() if response.content else {}
         except ValueError:
             body = {}
-        if not isinstance(body, dict):
+        if isinstance(body, list):
+            body = {"factors": body}  # the admin factor list is a bare JSON array
+        elif not isinstance(body, dict):
             body = {}
         if response.status_code >= 400:
             code = str(body.get("error_code") or body.get("code") or body.get("error") or "unknown")
@@ -182,6 +184,14 @@ class GoTrueClient:
         """
         body = {"email": email, "password": password, "email_confirm": True, "user_metadata": data}
         self._call("POST", "/admin/users", json=body, service=True)
+
+    def admin_list_factors(self, user_id: str) -> list[dict[str, Any]]:
+        answer = self._call("GET", f"/admin/users/{user_id}/factors", service=True)
+        items = answer.get("factors") or []
+        return [f for f in items if isinstance(f, dict)]
+
+    def admin_delete_factor(self, user_id: str, factor_id: str) -> None:
+        self._call("DELETE", f"/admin/users/{user_id}/factors/{factor_id}", service=True)
 
     def admin_ban_user(self, user_id: str, hours: int | None) -> None:
         duration = "none" if hours is None else f"{hours}h"

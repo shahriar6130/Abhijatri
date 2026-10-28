@@ -26,7 +26,7 @@ from app.models import (
     EnforcementCase,
     ModerationDecision,
     ModerationTask,
-    Notification,
+    NotificationDelivery,
     OutboxEvent,
     Report,
     Review,
@@ -38,6 +38,7 @@ from app.models import (
     VerificationCase,
     VerificationEvidence,
 )
+from app.notify import alerts
 from app.storage import StorageClient, StorageUnavailable, get_storage
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,8 @@ def _deny(session: Session, principal: Principal, request: Request, action: str,
             request_id=_request_id(request),
         )
         session.commit()
+        if alerts.check_denials(session, principal.user.id):  # many denials in a short time alert superadmins
+            session.commit()
     except Exception:  # noqa: BLE001 - the original error is what the caller needs
         session.rollback()
         logger.warning("could not record a denied attempt")
@@ -340,6 +343,18 @@ def release_task(task_id: uuid.UUID, body: LeaseBody, request: Request, principa
     return tasks.serialize(task)
 
 
+class AssignBody(_Body):
+    user_id: uuid.UUID | None
+
+
+@router.post("/tasks/{task_id}/assign")
+def assign_task(task_id: uuid.UUID, body: AssignBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
+    """A superadmin gives a task to one staff member, or back to the shared queue with ``user_id: null``."""
+    task = _run(session, principal, request, "task.assign", "task", task_id,
+                lambda: tasks.assign(session, principal, task_id, body.user_id, request_id=_request_id(request)))
+    return tasks.serialize(task)
+
+
 @router.post("/tasks/{task_id}/escalate")
 def escalate_task(task_id: uuid.UUID, body: EscalateBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
     task = _run(session, principal, request, "task.escalate", "task", task_id,
@@ -400,6 +415,38 @@ def media_url(review_id: uuid.UUID, media_id: uuid.UUID, principal: Staff, sessi
     except StorageUnavailable as error:
         raise ApiError("SERVICE_UNAVAILABLE", headers={"Retry-After": "5"}) from error
     return {"url": url, "expires_in": media.STAFF_URL_SECONDS}
+
+
+class MediaDecisionBody(_Body):
+    decision: str = Field(pattern="^(approve|reject)$")
+    reason_code: str = Field(min_length=2, max_length=60)
+
+
+@router.get("/media")
+def list_media(
+    principal: Staff,
+    session: DbSession,
+    state: Annotated[str | None, Query(pattern="^(pending|approved|rejected)$")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> dict[str, Any]:
+    """Recent review photos and videos, to find and correct a media decision."""
+    return {"items": media.staff_list(session, state, limit)}
+
+
+@router.post("/media/{media_id}/decision")
+def decide_media(media_id: uuid.UUID, body: MediaDecisionBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
+    """Approve or reject one photo or video after its review was decided; audited as media.approve / media.reject."""
+
+    def work() -> dict[str, Any]:
+        item, previous = media.change_decision(session, media_id, body.decision == "approve", principal.user.id)
+        audit.record(
+            session, actor=principal, action=f"media.{body.decision}", target_type="review_media", target_id=item.id,
+            reason=body.reason_code, metadata={"from": previous, "to": item.state, "review_id": str(item.review_id)},
+            request_id=_request_id(request),
+        )
+        return media.describe(item)
+
+    return _run(session, principal, request, f"media.{body.decision}", "review_media", media_id, work)
 
 
 @router.post("/submissions/{review_id}/conflict")
@@ -694,10 +741,12 @@ def monitoring_summary(principal: Staff, session: DbSession) -> dict[str, Any]:
             select(func.count()).select_from(ModerationTask).where(open_tasks, ModerationTask.claimed_by.is_not(None), ModerationTask.lease_expires_at < now)
         ) or 0,
         "open_reports": session.scalar(select(func.count()).select_from(Report).where(Report.state.in_(("open", "in_review")))) or 0,
-        "outbox_pending": session.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status.in_(("pending", "processing")))) or 0,
-        "outbox_failed": session.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status == "failed")) or 0,
-        "oldest_pending_event_age_seconds": _age(now, session.scalar(select(func.min(OutboxEvent.created_at)).where(OutboxEvent.status.in_(("pending", "processing"))))),
-        "emails_failed_or_ambiguous": session.scalar(select(func.count()).select_from(Notification).where(Notification.email_status.in_(("failed", "ambiguous")))) or 0,
+        "outbox_pending": session.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status.in_(("pending", "processing", "retry")))) or 0,
+        "outbox_failed": session.scalar(select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status == "dead_letter")) or 0,
+        "oldest_pending_event_age_seconds": _age(now, session.scalar(select(func.min(OutboxEvent.created_at)).where(OutboxEvent.status.in_(("pending", "processing", "retry"))))),
+        "emails_failed_or_ambiguous": session.scalar(
+            select(func.count()).select_from(NotificationDelivery).where(NotificationDelivery.status.in_(("failed_permanently", "ambiguous", "bounced")))
+        ) or 0,
         "open_verification_cases": session.scalar(select(func.count()).select_from(VerificationCase).where(VerificationCase.state.in_(("submitted", "in_review", "needs_clarification", "escalated")))) or 0,
         "open_appeals": session.scalar(select(func.count()).select_from(Appeal).where(Appeal.state.in_(("received", "in_review")))) or 0,
         "emergency_overdue": session.scalar(

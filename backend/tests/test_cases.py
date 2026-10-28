@@ -20,6 +20,7 @@ from app.models import (
     ModerationActionRecord,
     ModerationTask,
     Notification,
+    NotificationDelivery,
     OutboxEvent,
     Review,
     ReviewStatus,
@@ -29,7 +30,7 @@ from app.models import (
     VerificationCase,
     VerificationEvidence,
 )
-from app.notify import worker
+from app.notify import delivery, worker
 from app.notify.providers import RecordingProvider, SendAmbiguous, SendFailed
 from app.storage import get_storage
 
@@ -331,35 +332,41 @@ def test_events_become_notifications_once_and_critical_ones_are_emailed(client: 
     first = worker.run_once(sessions, provider)
     assert first["notifications"] >= 1 and first["emails"] == 1
     assert provider.sent[0].to == "author@example.com" and "not published" in provider.sent[0].subject
-    assert provider.sent[0].idempotency_key.startswith("notification-")
+    assert provider.sent[0].idempotency_key.startswith("delivery-")
     postgres_session.execute(update(OutboxEvent).values(status="pending", processed_at=None))  # replay every event
     postgres_session.commit()
     again = worker.run_once(sessions, provider)
     assert again["notifications"] == 0 and len(provider.sent) == 1, "the notification identity is unique; nothing is sent twice"
 
     listing = author.get("/api/v1/notifications").json()
-    assert listing["unread"] == 1 and listing["items"][0]["kind"] == "review.rejected" and listing["items"][0]["critical"] is True
+    assert listing["unread"] == 1 and listing["items"][0]["kind"] == "content.rejected" and listing["items"][0]["critical"] is True
     note_id = listing["items"][0]["id"]
-    assert author.post(f"/api/v1/notifications/{note_id}/read").json() == {"unread": 0}
+    assert author.patch(f"/api/v1/notifications/{note_id}", json={"read": True}).json()["unread"] == 0
     other = member(client, postgres_session, fake, "other@example.com", "203.0.113.105")
-    assert other.post(f"/api/v1/notifications/{note_id}/read").status_code == 404, "only your own"
+    assert other.patch(f"/api/v1/notifications/{note_id}", json={"read": True}).status_code == 404, "only your own"
 
 
 def test_an_unclear_send_is_ambiguous_and_a_failure_is_retried(postgres_session: Session, fake: support.FakeGoTrue, auth_env: None, client: TestClient) -> None:
     member(client, postgres_session, fake, "author@example.com", "203.0.113.106")
     _rejected_member_review(client, postgres_session, fake, "author@example.com")
     sessions = factory(postgres_session)
-    worker.run_once(sessions, None)  # notifications only
-    notification = postgres_session.scalar(select(Notification).where(Notification.critical.is_(True)))
-    assert notification is not None and notification.email_status == "pending"
-    worker.send_pending_emails(sessions, RecordingProvider(fail_with=SendFailed))
+    for event_id in worker.claim_events(sessions):  # notifications only, no email yet
+        worker.process_event(sessions, event_id)
+    notification = postgres_session.scalar(select(Notification).where(Notification.priority == "critical"))
+    assert notification is not None and notification.delivery_mode == "immediate"
+    delivery_row = postgres_session.scalar(select(NotificationDelivery).where(NotificationDelivery.notification_id == notification.id))
+    assert delivery_row is not None and delivery_row.status == "queued"
+    delivery.send_due(sessions, RecordingProvider(fail_with=SendFailed))
     postgres_session.expire_all()
-    assert postgres_session.get(Notification, notification.id).email_status == "pending", "a certain failure is retried"
-    worker.send_pending_emails(sessions, RecordingProvider(fail_with=SendAmbiguous))
+    retried = postgres_session.get(NotificationDelivery, delivery_row.id)
+    assert retried.status == "queued" and retried.next_attempt_at > datetime.now(UTC), "a certain failure is retried later"
+    postgres_session.execute(update(NotificationDelivery).values(next_attempt_at=datetime.now(UTC)))
+    postgres_session.commit()
+    delivery.send_due(sessions, RecordingProvider(fail_with=SendAmbiguous))
     postgres_session.expire_all()
-    assert postgres_session.get(Notification, notification.id).email_status == "ambiguous", "a crash after acceptance is never resent blindly"
+    assert postgres_session.get(NotificationDelivery, delivery_row.id).status == "ambiguous", "an unclear send is never resent blindly"
     again = RecordingProvider()
-    worker.send_pending_emails(sessions, again)
+    delivery.send_due(sessions, again)
     assert again.sent == []
 
 
@@ -370,7 +377,7 @@ def test_a_broken_event_is_retried_then_parked(postgres_session: Session) -> Non
     sessions = factory(postgres_session)
     assert worker.run_once(sessions, None)["events"] >= 1
     postgres_session.expire_all()
-    assert postgres_session.get(OutboxEvent, event.id).status == "done", "an event with nothing to say is simply done"
+    assert postgres_session.get(OutboxEvent, event.id).status == "processed", "an event with nothing to say is simply processed"
 
 
 def test_the_daily_digest_bundles_non_critical_notifications(postgres_session: Session, fake: support.FakeGoTrue, auth_env: None, client: TestClient, storage: FakeStorage) -> None:
@@ -380,11 +387,14 @@ def test_the_daily_digest_bundles_non_critical_notifications(postgres_session: S
     sessions = factory(postgres_session)
     worker.run_once(sessions, None)
     staff_note = postgres_session.scalar(select(Notification).where(Notification.kind == "staff.verification_submitted"))
-    assert staff_note is not None and staff_note.email_status == "digest" and staff_note.recipient_user_id == fake.users["mod@example.com"]["id"]
+    assert staff_note is not None and staff_note.delivery_mode == "digest" and staff_note.recipient_user_id == fake.users["mod@example.com"]["id"]
     provider = RecordingProvider()
-    assert worker.send_daily_digest(sessions, provider) == 1
-    assert provider.sent[0].to == "mod@example.com" and "summary" in provider.sent[0].subject
-    assert worker.send_daily_digest(sessions, provider) == 0, "each notification is digested once"
+    tomorrow_morning = datetime.now(UTC) + timedelta(days=1)
+    assert delivery.build_digests(sessions, tomorrow_morning.replace(hour=3, minute=0)) >= 1  # 09:00 in Dhaka
+    delivery.send_due(sessions, provider, now=tomorrow_morning.replace(hour=3, minute=0))
+    digests = [m for m in provider.sent if "summary" in m.subject]
+    assert [m.to for m in digests if m.to == "mod@example.com"] == ["mod@example.com"]
+    assert delivery.build_digests(sessions, tomorrow_morning.replace(hour=4)) == 0, "each notification is digested once"
     del case, mod
 
 
@@ -420,7 +430,7 @@ def test_retention_keeps_what_an_open_appeal_needs(client: TestClient, postgres_
 def test_old_notifications_are_purged_by_class(postgres_session: Session) -> None:
     user = User(email="a@example.com", display_name="A")
     postgres_session.add(user)
-    event = OutboxEvent(topic="x", aggregate_id=uuid.uuid4(), payload={}, status="done")
+    event = OutboxEvent(topic="x", aggregate_id=uuid.uuid4(), payload={}, status="processed")
     postgres_session.add(event)
     postgres_session.flush()
     now = datetime.now(UTC)
@@ -431,7 +441,11 @@ def test_old_notifications_are_purged_by_class(postgres_session: Session) -> Non
         ("crit-old", True, now - timedelta(days=740)),
     ]
     for kind, critical, created in rows:
-        postgres_session.add(Notification(event_id=event.id, recipient_user_id=user.id, kind=kind, critical=critical, title_bn="t", title_en="t", body_bn="b", body_en="b", created_at=created))
+        expires = created + timedelta(days=730 if critical else 90)
+        postgres_session.add(Notification(
+            event_id=event.id, recipient_user_id=user.id, kind=kind, priority="critical" if critical else "normal", template_key=kind,
+            title_bn="t", title_en="t", body_bn="b", body_en="b", created_at=created, expires_at=expires,
+        ))
     postgres_session.commit()
     assert retention.purge_notifications(factory(postgres_session), now) == 2
     assert {n.kind for n in postgres_session.scalars(select(Notification))} == {"std-new", "crit-mid"}
@@ -442,7 +456,7 @@ def test_old_notifications_are_purged_by_class(postgres_session: Session) -> Non
 
 def test_monitoring_counts_each_concern_separately(client: TestClient, postgres_session: Session, fake: support.FakeGoTrue) -> None:
     mod = admin.staff_client(client, postgres_session, fake, "mod@example.com", "moderator", "203.0.113.113")
-    postgres_session.add(OutboxEvent(topic="x", aggregate_id=uuid.uuid4(), payload={}, status="failed"))
+    postgres_session.add(OutboxEvent(topic="x", aggregate_id=uuid.uuid4(), payload={}, status="dead_letter"))
     postgres_session.commit()
     summary = mod.get(f"{BASE}/monitoring/summary").json()
     for key in ("outbox_failed", "emails_failed_or_ambiguous", "open_verification_cases", "open_appeals", "emergency_overdue", "active_sanctions"):

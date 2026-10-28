@@ -1,10 +1,13 @@
-"""Which outbox events notify whom, and what they say (Moderation spec 11).
+"""Turn one outbox event into the notifications it causes (Notification spec 3 to 6).
 
-Every message exists in Bangla and English. "Critical" marks an account decision: it is emailed at once
-and kept 24 months; everything else goes into the daily digest and is kept 90 days. Staff recipients
-captured on the event are re-checked against their current role before anything is disclosed.
+The catalogue in ``registry.py`` decides which rules apply. Recipients come only from the allowlisted
+resolvers; staff captured at event time are re-checked against their current role here, so a person
+who lost the role is not told restricted case details. Texts come from the active template version
+(``notification_templates``) or the version-1 text in code, filled only with allowlisted variables
+taken from the event's own facts, never from the current state of the case.
 """
 
+import string
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -12,20 +15,35 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import OutboxEvent, Report, Review, UserRole
+from app.models import NotificationRule, NotificationTemplate, OutboxEvent, User, UserRole
+from app.notify import registry
+from app.notify.registry import Rule
+
+OUTCOME = {
+    "upheld": ("মূল সিদ্ধান্ত বহাল", "the original decision stands"),
+    "overturned": ("মূল সিদ্ধান্ত বাতিল করা হয়েছে", "the original decision was reversed"),
+}
+ROLE_NAMES = {"moderator": ("মডারেটর", "moderator"), "superadmin": ("সুপারঅ্যাডমিন", "superadmin"), "none": ("কোনোটি নয়", "none")}
 
 
 @dataclass(frozen=True)
 class Message:
     recipient: uuid.UUID
     kind: str
-    critical: bool
+    priority: str
+    audience: str
+    email: bool
+    template_version: int
     title_bn: str
     title_en: str
     body_bn: str
     body_en: str
     link: str | None = None
     appeal_id: uuid.UUID | None = None
+
+    @property
+    def critical(self) -> bool:
+        return self.priority == "critical"
 
 
 def _uuid(value: Any) -> uuid.UUID | None:
@@ -35,92 +53,134 @@ def _uuid(value: Any) -> uuid.UUID | None:
         return None
 
 
-def _current_staff(session: Session, ids: list[str]) -> list[uuid.UUID]:
-    wanted = [i for i in (_uuid(v) for v in ids) if i]
-    if not wanted:
-        return []
-    return list(session.scalars(select(UserRole.user_id).where(UserRole.user_id.in_(wanted), UserRole.revoked_at.is_(None))))
+def _fact(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
 
 
-REVIEW_TEXT = {
-    "PUBLISHED": (False, "আপনার রিভিউ প্রকাশিত হয়েছে", "Your review is published", "মডারেটর আপনার রিভিউ প্রকাশ করেছেন।", "A moderator published your review."),
-    "REJECTED": (True, "আপনার রিভিউ প্রকাশ করা হয়নি", "Your review was not published", "রিভিউটি নীতিমালার সাথে মেলেনি। ৩০ দিনের মধ্যে আপিল করতে পারবেন।", "The review did not meet the policy. You can appeal within 30 days."),
-    "HIDDEN": (True, "আপনার রিভিউ লুকানো হয়েছে", "Your review was hidden", "রিভিউটি এখন জনসমক্ষে দেখা যাচ্ছে না। ৩০ দিনের মধ্যে আপিল করতে পারবেন।", "The review is no longer public. You can appeal within 30 days."),
-}
+def _applies(rule: Rule, payload: dict[str, Any]) -> bool:
+    return all(_fact(payload.get(key)) in allowed for key, allowed in rule.when)
+
+
+def _active_staff(session: Session, ids: list[uuid.UUID], role: str | None) -> set[uuid.UUID]:
+    if not ids:
+        return set()
+    statement = select(UserRole.user_id).where(UserRole.user_id.in_(ids), UserRole.revoked_at.is_(None))
+    if role:
+        statement = statement.where(UserRole.role == role)
+    return set(session.scalars(statement))
+
+
+def recipients(session: Session, rule: Rule, payload: dict[str, Any]) -> list[uuid.UUID]:
+    """The allowlisted recipient policies. Staff notices go only to people who hold a staff role now."""
+    if rule.resolver == "payload_user":
+        user_id = _uuid(payload.get(rule.source))
+        if user_id is None or session.get(User, user_id) is None:
+            return []
+        if rule.audience == "staff" and not _active_staff(session, [user_id], rule.role):
+            return []
+        return [user_id]
+    if rule.resolver == "captured_staff":
+        captured = [i for i in (_uuid(v) for v in payload.get(rule.source) or []) if i]
+        current = _active_staff(session, captured, rule.role)
+        return [i for i in captured if i in current]
+    return []
+
+
+def _variables(payload: dict[str, Any], locale: int) -> dict[str, str]:
+    reference = payload.get("reference") or payload.get("appeal_id") or ""
+    outcome = OUTCOME.get(str(payload.get("outcome")), ("", ""))[locale]
+    role = ROLE_NAMES.get(str(payload.get("role")), ("", ""))[locale]
+    return {
+        "reference": str(reference)[:8],
+        "deadline": str(payload.get("deadline_at") or "")[:10],
+        "question": str(payload.get("question") or "")[:300],
+        "count": str(payload.get("count") or ""),
+        "outcome": outcome,
+        "role": role,
+    }
+
+
+class _Only(dict[str, str]):
+    """Unknown placeholders render as nothing instead of failing or leaking anything."""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def render(text: str, variables: dict[str, str], allowed: tuple[str, ...]) -> str:
+    safe = _Only({k: v for k, v in variables.items() if k in allowed})
+    return string.Formatter().vformat(text, (), safe)
+
+
+def template_variables(text: str) -> set[str]:
+    """Placeholder names used in a template text; attribute or index access is not allowed."""
+    names: set[str] = set()
+    for _, name, spec, conversion in string.Formatter().parse(text):
+        if name is None:
+            continue
+        if not name.isidentifier() or spec or conversion:
+            raise ValueError(f"placeholder {{{name}}} is not allowed")
+        names.add(name)
+    return names
+
+
+def _link(rule: Rule, payload: dict[str, Any]) -> str | None:
+    if rule.route is None:
+        return None
+    if "{destination_id}" in rule.route:
+        destination = _uuid(payload.get("destination_id"))
+        return rule.route.format(destination_id=destination) if destination else "/account/notifications"
+    return rule.route
+
+
+def _texts(session: Session, key: str) -> tuple[int, dict[str, tuple[str, str]]]:
+    """(version, {locale: (title, body)}) from the active in-app templates, or version 1 from code."""
+    default = registry.TEMPLATES[key]
+    texts = {"bn": (default.title_bn, default.body_bn), "en": (default.title_en, default.body_en)}
+    version = 1
+    for row in session.scalars(
+        select(NotificationTemplate).where(
+            NotificationTemplate.template_key == key, NotificationTemplate.channel == "in_app", NotificationTemplate.status == "active"
+        )
+    ):
+        texts[row.locale] = (row.title_template or texts[row.locale][0], row.body_template)
+        version = max(version, row.version)
+    return version, texts
 
 
 def messages_for(session: Session, event: OutboxEvent) -> list[Message]:
-    p, topic = event.payload, event.topic
+    payload = event.payload or {}
+    overrides = {row.template_key: row for row in session.scalars(select(NotificationRule))}
     out: list[Message] = []
-
-    if topic == "review.state_changed":
-        review = session.get(Review, _uuid(p.get("review_id")))
-        status = str(p.get("status"))
-        if review is not None and review.author_user_id and status in REVIEW_TEXT:
-            critical, tbn, ten, bbn, ben = REVIEW_TEXT[status]
-            out.append(Message(review.author_user_id, f"review.{status.lower()}", critical, tbn, ten, bbn, ben, f"/destinations/{review.destination_id}"))
-
-    elif topic == "report.state_changed" and p.get("state") in ("actioned", "dismissed"):
-        report = session.get(Report, _uuid(p.get("report_id")))
-        if report is not None:
-            done = p["state"] == "actioned"
-            out.append(Message(
-                report.reporter_user_id, f"report.{p['state']}", False,
-                "আপনার রিপোর্ট পর্যালোচনা হয়েছে", "Your report was reviewed",
-                "ধন্যবাদ। মডারেটর ব্যবস্থা নিয়েছেন।" if done else "ধন্যবাদ। মডারেটর কোনো সমস্যা পাননি।",
-                "Thank you. A moderator took action." if done else "Thank you. A moderator found no problem.",
-            ))
-
-    elif topic == "verification.submitted":
-        for staff in _current_staff(session, p.get("staff_recipients", [])):
-            out.append(Message(staff, "staff.verification_submitted", False, "নতুন যাচাই আবেদন", "New verification request", "সারিতে একটি নতুন যাচাই আবেদন আছে।", "A new verification request is in the queue."))
-
-    elif topic == "verification.state_changed":
-        applicant, state = _uuid(p.get("applicant_id")), p.get("state")
-        texts = {
-            "approved": (True, "আপনি এখন যাচাইকৃত সদস্য", "You are now a Verified Member", "অভিনন্দন! আপনার রিভিউ এখন কমিউনিটি রেটিংয়ে গণনা হবে।", "Congratulations! Your reviews now count towards the Community Rating."),
-            "rejected": (True, "যাচাই আবেদন অনুমোদিত হয়নি", "Verification was not approved", "৩০ দিনের মধ্যে আপিল করতে পারবেন।", "You can appeal within 30 days."),
-            "needs_clarification": (False, "যাচাইয়ের জন্য আরও তথ্য দরকার", "More information is needed", "মডারেটর আপনার আবেদনে প্রশ্ন রেখেছেন। উত্তর দিন।", "A moderator has a question about your request. Please answer it."),
-        }
-        if applicant and state in texts:
-            critical, tbn, ten, bbn, ben = texts[state]
-            out.append(Message(applicant, f"verification.{state}", critical, tbn, ten, bbn, ben, "/account/verification"))
-
-    elif topic == "appeal.received":
-        appeal_id, appellant = _uuid(p.get("appeal_id")), _uuid(p.get("appellant_id"))
-        deadline = str(p.get("deadline_at", ""))[:10]
-        reference = str(appeal_id)[:8]
-        if appellant:
-            out.append(Message(appellant, "appeal.received", True, "আপিল গ্রহণ করা হয়েছে", "Your appeal was received",
-                               f"আপিল নম্বর {reference}। একজন স্বাধীন মডারেটর এটি দেখবেন। শেষ তারিখ {deadline}।",
-                               f"Case reference {reference}. An independent moderator will review it. Deadline {deadline}.",
-                               "/account/appeals", appeal_id))
-        for staff in _current_staff(session, p.get("staff_recipients", [])):
-            out.append(Message(staff, "staff.appeal_received", False, "নতুন আপিল", "New appeal", f"আপিল {reference} সারিতে আছে।", f"Appeal {reference} is in the queue.", None, appeal_id))
-
-    elif topic == "appeal.decided":
-        appellant, upheld = _uuid(p.get("appellant_id")), p.get("outcome") == "upheld"
-        reference = str(p.get("appeal_id"))[:8]
-        if appellant:
-            out.append(Message(appellant, "appeal.decided", True, "আপিলের সিদ্ধান্ত", "Your appeal was decided",
-                               f"আপিল {reference}: মূল সিদ্ধান্ত বহাল।" if upheld else f"আপিল {reference}: মূল সিদ্ধান্ত বাতিল করা হয়েছে।",
-                               f"Appeal {reference}: the original decision stands." if upheld else f"Appeal {reference}: the original decision was reversed.",
-                               "/account/appeals", _uuid(p.get("appeal_id"))))
-
-    elif topic == "enforcement.opened":
-        subject = _uuid(p.get("subject_id"))
-        if subject:
-            out.append(Message(subject, "enforcement.opened", True, "আপনার কনটেন্ট বা অ্যাকাউন্টে ব্যবস্থা", "Action on your content or account",
-                               "নীতিমালা অনুযায়ী ব্যবস্থা নেওয়া হয়েছে। ৩০ দিনের মধ্যে আপিল করতে পারবেন।", "Action was taken under the policy. You can appeal within 30 days.", "/account/appeals"))
-        for staff in _current_staff(session, p.get("staff_recipients", [])):
-            out.append(Message(staff, "staff.emergency_takedown", True, "জরুরি টেকডাউন: ২৪ ঘণ্টার মধ্যে পর্যালোচনা", "Emergency takedown: review within 24 hours",
-                               "একটি জরুরি টেকডাউন সুপারঅ্যাডমিনের পর্যালোচনার অপেক্ষায়।", "An emergency takedown is waiting for a superadmin review."))
-
-    elif topic in ("sanction.created", "sanction.ended"):
-        user = _uuid(p.get("user_id"))
-        if user:
-            created = topic == "sanction.created"
-            out.append(Message(user, topic, created, "অ্যাকাউন্টে সীমাবদ্ধতা" if created else "সীমাবদ্ধতা শেষ", "Account restriction" if created else "Restriction ended",
-                               "আপনার অ্যাকাউন্টে একটি সীমাবদ্ধতা যোগ হয়েছে।" if created else "আপনার অ্যাকাউন্টের সীমাবদ্ধতা শেষ হয়েছে।",
-                               "A restriction was placed on your account." if created else "The restriction on your account has ended.", "/account/appeals"))
+    for rule in registry.rules_for(event.topic):
+        if not _applies(rule, payload):
+            continue
+        override = overrides.get(rule.template_key)
+        if override is not None and not override.enabled:
+            continue
+        people = recipients(session, rule, payload)
+        if not people:
+            continue
+        allowed = registry.TEMPLATES[rule.template_key].variables
+        version, texts = _texts(session, rule.template_key)
+        bn, en = _variables(payload, 0), _variables(payload, 1)
+        for person in people:
+            out.append(
+                Message(
+                    recipient=person,
+                    kind=rule.template_key,
+                    priority=override.priority if override else rule.priority,
+                    audience=rule.audience,
+                    email=override.email if override else rule.email,
+                    template_version=version,
+                    title_bn=render(texts["bn"][0], bn, allowed)[:160],
+                    title_en=render(texts["en"][0], en, allowed)[:160],
+                    body_bn=render(texts["bn"][1], bn, allowed)[:600],
+                    body_en=render(texts["en"][1], en, allowed)[:600],
+                    link=_link(rule, payload),
+                    appeal_id=_uuid(payload.get(rule.appeal_field)) if rule.appeal_field else None,
+                )
+            )
     return out

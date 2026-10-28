@@ -21,7 +21,17 @@ from app.config import get_settings
 
 
 class SendFailed(Exception):
-    pass
+    """The message was certainly not accepted. ``permanent``: retrying cannot help (a 4xx other than 429,
+    a refused recipient); otherwise the delivery is retried on the schedule."""
+
+    def __init__(self, message: str, *, permanent: bool = False, code: str | None = None) -> None:
+        super().__init__(message)
+        self.permanent = permanent
+        self.code = code
+
+
+def _rejected(status: int) -> bool:
+    return 400 <= status < 500 and status != 429
 
 
 class SendAmbiguous(Exception):
@@ -67,7 +77,7 @@ class MailpitProvider:
         except httpx.HTTPError as error:
             raise SendFailed(type(error).__name__) from error
         if response.status_code >= 300:
-            raise SendFailed(f"mailpit {response.status_code}")
+            raise SendFailed(f"mailpit {response.status_code}", permanent=_rejected(response.status_code), code=f"http_{response.status_code}")
         return str(response.json().get("ID", ""))
 
 
@@ -89,10 +99,8 @@ class ResendProvider:
             raise SendAmbiguous(type(error).__name__) from error  # the request may have reached Resend
         except httpx.HTTPError as error:
             raise SendFailed(type(error).__name__) from error
-        if response.status_code >= 500:
-            raise SendFailed(f"resend {response.status_code}")
         if response.status_code >= 300:
-            raise SendFailed(f"resend {response.status_code}")
+            raise SendFailed(f"resend {response.status_code}", permanent=_rejected(response.status_code), code=f"http_{response.status_code}")
         return str(response.json().get("id", ""))
 
 
@@ -132,7 +140,7 @@ class BrevoProvider:
                 reason = str(response.json().get("code") or response.status_code)
             except ValueError:
                 reason = str(response.status_code)
-            raise SendFailed(f"brevo {response.status_code} {reason}")
+            raise SendFailed(f"brevo {response.status_code} {reason}", permanent=_rejected(response.status_code), code=f"http_{response.status_code}")
         return str(response.json().get("messageId", ""))
 
 
@@ -166,6 +174,8 @@ class SmtpProvider:
                     raise SendAmbiguous(type(error).__name__) from error  # the server may already have the message
         except SendAmbiguous:
             raise
+        except smtplib.SMTPRecipientsRefused as error:
+            raise SendFailed(type(error).__name__, permanent=True, code="recipient_refused") from error
         except (smtplib.SMTPException, OSError) as error:
             raise SendFailed(type(error).__name__) from error
         return message_id
