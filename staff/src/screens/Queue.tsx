@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { claimTask, decide, escalateTask, getQueue, heartbeatTask, releaseTask, reviewMediaUrl, transitionReport } from '../api';
+import { assignTask, claimTask, decide, escalateTask, getQueue, getStaff, heartbeatTask, releaseTask, reviewMediaUrl, transitionReport } from '../api';
 import {
   REASONS,
   REPORT_REASONS,
@@ -276,6 +276,8 @@ function Detail({ lang, role, item, lease, now, busy, onClaim, onRelease, onEsca
       {subject?.kind === 'enforcement' && <EnforcementBody subject={subject} lang={lang} />}
       {!subject && <Notice tone="info">{t('এই কাজের বিষয়বস্তু আর নেই।', 'The content of this task is gone.')}</Notice>}
 
+      {role === 'superadmin' && !lease && <AssignControl lang={lang} item={item} busy={busy} run={run} />}
+
       {!lease && (
         <div className="row">
           <button type="button" className="primary" disabled={busy || !canClaim} onClick={onClaim}>
@@ -306,6 +308,44 @@ function Detail({ lang, role, item, lease, now, busy, onClaim, onRelease, onEsca
           {subject.kind === 'enforcement' && <EnforcementFollowUp lang={lang} subject={subject} busy={busy} run={run} />}
         </>
       )}
+    </div>
+  );
+}
+
+/** Superadmin: give the task to one staff member (they are notified) or back to the shared queue. */
+function AssignControl({ lang, item, busy, run }: { lang: Lang; item: QueueItem; busy: boolean; run: (work: () => Promise<string | void>) => Promise<void> }) {
+  const t = makeT(lang);
+  const [staff, setStaff] = useState<{ user_id: string; display_name: string; role: string }[] | null>(null);
+  const [choice, setChoice] = useState(item.assigned_to ?? '');
+
+  useEffect(() => {
+    getStaff().then((answer) => setStaff(answer.items)).catch(() => setStaff([]));
+  }, []);
+
+  return (
+    <div className="row small">
+      <label htmlFor={`assign-${item.id}`}>{t('দায়িত্ব দিন', 'Assign to')}</label>
+      <select id={`assign-${item.id}`} value={choice} onChange={(e) => setChoice(e.target.value)} disabled={busy || staff === null}>
+        <option value="">{t('সাধারণ সারি', 'Shared queue')}</option>
+        {(staff ?? []).map((member) => (
+          <option key={member.user_id} value={member.user_id}>
+            {member.display_name} ({member.role})
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="ghost"
+        disabled={busy || choice === (item.assigned_to ?? '')}
+        onClick={() =>
+          void run(async () => {
+            await assignTask(item.id, choice || null);
+            return choice ? t('দায়িত্ব দেওয়া হয়েছে; তাঁকে জানানো হয়েছে।', 'Assigned; they have been notified.') : t('সাধারণ সারিতে ফেরত।', 'Back in the shared queue.');
+          })
+        }
+      >
+        {t('সংরক্ষণ', 'Save')}
+      </button>
     </div>
   );
 }
@@ -489,17 +529,20 @@ function DecisionForm({ lang, item, subject, lease, busy, run }: FormProps & { s
       </select>
       {decision === 'PUBLISH' && media.length > 0 && (
         <fieldset className="stack">
-          <legend className="small">{t('যে ছবি/ভিডিও প্রকাশ হবে না তাতে টিক দিন', 'Tick any photo or video that must not be published')}</legend>
+          <legend className="small">{t('রিভিউর সাথে প্রকাশ হবে (না চাইলে টিক তুলে দিন)', 'Published with the review (untick any that must not be shown)')}</legend>
           {media.map((m) => (
             <label key={m.id} className="row small">
               <input
                 type="checkbox"
-                checked={rejectedMedia.includes(m.id)}
-                onChange={(e) => setRejectedMedia((ids) => (e.target.checked ? [...ids, m.id] : ids.filter((id) => id !== m.id)))}
+                checked={!rejectedMedia.includes(m.id)}
+                onChange={(e) => setRejectedMedia((ids) => (e.target.checked ? ids.filter((id) => id !== m.id) : [...ids, m.id]))}
               />
-              {m.kind === 'image' ? t('ছবি', 'Photo') : t('ভিডিও', 'Video')}: {m.alt_text}
+              {t('প্রকাশ করুন', 'Publish')} {m.kind === 'image' ? t('ছবি', 'photo') : t('ভিডিও', 'video')}: {m.alt_text}
             </label>
           ))}
+          {rejectedMedia.length > 0 && (
+            <p className="small">{t(`${rejectedMedia.length}টি প্রকাশ হবে না।`, `${rejectedMedia.length} will not be published.`)}</p>
+          )}
         </fieldset>
       )}
       {decision === 'REJECT' && media.length > 0 && (

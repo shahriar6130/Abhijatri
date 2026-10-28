@@ -27,7 +27,7 @@ async function csrf(): Promise<string> {
 }
 
 interface CallOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT';
   body?: unknown;
   /** True for a write made with a session cookie: it carries `X-CSRF-Token`. */
   session?: boolean;

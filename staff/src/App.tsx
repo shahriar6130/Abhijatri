@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { StaffError, getSession, logout } from './api';
 import { Audit } from './screens/Audit';
 import { Enforcement } from './screens/Enforcement';
+import { Inbox } from './screens/Inbox';
+import { Media } from './screens/Media';
+import { Notifications } from './screens/Notifications';
 import { Monitor } from './screens/Monitor';
 import { Queue } from './screens/Queue';
 import { SignIn } from './screens/SignIn';
@@ -9,7 +12,7 @@ import { StaffRoles } from './screens/Staff';
 import type { Lang, Session } from './types';
 import { Notice, makeT } from './ui';
 
-type View = 'queue' | 'enforcement' | 'audit' | 'staff' | 'monitor';
+type View = 'queue' | 'inbox' | 'media' | 'enforcement' | 'audit' | 'staff' | 'monitor' | 'notifications';
 
 /**
  * The staff shell. It shows only what the signed-in role may use, but that is a convenience: every
@@ -61,10 +64,13 @@ export function App() {
   const role = session.role;
   const tabs: { id: View; label: string; show: boolean }[] = [
     { id: 'queue', label: t('কাজের সারি', 'Queue'), show: true },
+    { id: 'inbox', label: t('ইনবক্স', 'Inbox'), show: true },
+    { id: 'media', label: t('ছবি ও ভিডিও', 'Media'), show: true },
     { id: 'enforcement', label: t('এনফোর্সমেন্ট', 'Enforcement'), show: true },
     { id: 'audit', label: t('অডিট', 'Audit'), show: true },
     { id: 'monitor', label: t('পর্যবেক্ষণ', 'Monitoring'), show: true },
     { id: 'staff', label: t('স্টাফ', 'Staff'), show: role === 'superadmin' },
+    { id: 'notifications', label: t('বিজ্ঞপ্তি ব্যবস্থা', 'Notifications'), show: role === 'superadmin' },
   ];
 
   return (
@@ -95,6 +101,9 @@ export function App() {
         </div>
       </header>
       {view === 'queue' && <Queue lang={lang} role={role} userId={session.user.id} />}
+      {view === 'inbox' && <Inbox lang={lang} />}
+      {view === 'media' && <Media lang={lang} />}
+      {view === 'notifications' && role === 'superadmin' && <Notifications lang={lang} />}
       {view === 'enforcement' && <Enforcement lang={lang} role={role} />}
       {view === 'audit' && <Audit lang={lang} />}
       {view === 'monitor' && <Monitor lang={lang} />}

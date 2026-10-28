@@ -126,10 +126,33 @@ Keep the member signed in at http://localhost:5173 in one browser profile and th
 | D15 | Restriction | Superadmin, Enforcement: "Act on an account", search the member, restriction "Posting restriction", 7 days | The member gets "Account restriction"; reporting a review or requesting verification answers "Your account is temporarily restricted" |
 | D16 | Suspension | Superadmin: restriction "Suspension" | The member's next page load signs them out ("This account has been disabled"); "Lift" in the case list restores access |
 | D17 | Expiry | `docker exec supabase_db_Abhijatri psql -U postgres -c "update sanctions set ends_at = now() - interval '1 minute' where state = 'active'"`, then `cd backend; .venv\Scripts\python -m app.jobs.retention` | `sanctions_expired` > 0; the account is active again; the audit log shows `sanction.expired` with no actor (system) |
-| D18 | Digest | `cd backend; .venv\Scripts\python -c "from app.db import SessionLocal; from app.notify.worker import send_daily_digest; from app.notify.providers import get_provider; print(send_daily_digest(SessionLocal, get_provider()))"` | One "Your Abhijatri summary" email per person with non-critical notices (it also runs by itself at 08:00 Dhaka) |
+| D18 | Digest | `cd backend; .venv\Scripts\python -c "from app.db import SessionLocal; from app.notify import delivery; from app.notify.providers import get_provider; print(delivery.build_digests(SessionLocal), delivery.send_due(SessionLocal, get_provider()))"` | One "Your Abhijatri summary" email per person with waiting non-critical notices, once per local day after their digest time (default 08:00 Asia/Dhaka). It also runs by itself every minute |
 | D19 | Monitoring | Staff: Monitoring tab | Open verification requests, open appeals, overdue emergency takedowns, active restrictions, failed outbox events, failed or unclear emails |
 
 Automatic version of most of this (needs a superadmin with an authenticator): `cd backend; .venv\Scripts\python scripts\e2e_cases.py --staff-email <superadmin> --staff-password <password> --staff-totp-secret <secret shown at enrolment>`. It reports how many seconds the live notification took.
+
+## 5d. Notification system v1.1 (Docs/Notification-Documentation.md)
+
+Same two-profile setup as 5b; `EMAIL_PROVIDER=mailpit` so every email lands in http://127.0.0.1:54324.
+
+| # | Case | Steps | Expected |
+|---|---|---|---|
+| N1 | Inbox page | Member: bell, "All notifications and email settings" (or `/account/notifications`) | The list with category and "Important" tags, newest first; "Load more" after 20; tabs All / Unread (count) / Archived |
+| N2 | Read and archive | Press "Mark read", then "Archive" on one item | The unread count drops; the item moves to the Archived tab; "Unarchive" brings it back |
+| N3 | Email preference: off | Email section: "No email (only here)", Save. Staff publishes one of the member's reviews | "Your review is published" appears in the bell, but no email arrives |
+| N4 | Critical always emailed | With "off" still set, staff rejects a review | "Your review was not published" in the bell **and** an email in Mailpit within seconds |
+| N5 | Daily digest | Choose "A daily summary", time a few minutes from now, Save; staff publishes another review | No email at once; after the chosen time (scanner runs every minute) one "Your Abhijatri summary (n)" email |
+| N6 | Live reconnect | Stop the API for 20 s while the member page is open, then start it | The bell panel shows "Live updates paused; reconnecting"; after the restart it disappears and the list is refetched |
+| N7 | Assignment | Superadmin: queue item, "Assign to" a moderator, Save | The moderator's staff Inbox tab shows "A task was assigned to you"; assigning to someone else gives the first one "A task was unassigned" |
+| N8 | Role revoked | Superadmin: Staff tab, remove a moderator's role | The moderator's public bell shows "Your staff role was removed"; their old staff notices (assignments, new verification) are no longer listed |
+| N9 | Deliveries | Superadmin: Notifications tab, Deliveries | Recent emails with status, tries and an address reference (no address); "Details" lists every attempt |
+| N10 | Retry | Make one email ambiguous: `docker exec supabase_db_Abhijatri psql -U postgres -c "update notification_deliveries set status='ambiguous' where id = (select id from notification_deliveries order by created_at desc limit 1)"`; Details, write a reason, "Retry" | The delivery goes back to queued and is sent; the Audit tab shows `notification.delivery_retried` |
+| N11 | Suppression | Notifications tab, Suppressions: add the member's email with reason `owner_request`; trigger a critical notice | The bell still shows it, but no email: the delivery is `skipped` (`suppressed`). Remove it with a reason; both changes are in the audit log |
+| N12 | Template version | Templates and rules: choose `content.rejected`, new version (in_app, English) "We could not publish your review", Save draft, Activate | The next rejection uses the new title; version 1 shows `retired`; a body with `{email}` is refused ("UNKNOWN_VARIABLE") |
+| N13 | Rule | Same screen: "Turn email off" for `content.published` | Later publish notices arrive in the bell only |
+| N14 | Alerts | Leave a claimed task until under a minute is left | The holder's Inbox shows "Your claim is about to expire" once |
+| N15 | Ops dashboard | Ops dashboard (Vercel): Notifications panel | Events waiting, oldest waiting minutes, dead letters, failed emails in the last hour, rejected callbacks, emails of the last day by status |
+| N16 | Webhook (optional) | Set `BREVO_WEBHOOK_TOKEN` in `backend/.env`, restart, then `curl -X POST http://localhost:8000/api/v1/webhooks/notifications/brevo -H "content-type: application/json" -H "authorization: Bearer <token>" -d "{\"event\":\"delivered\",\"message-id\":\"<id>\",\"ts_event\":<unix time>}"` | `{"status":"processed"}`, then `"duplicate"` on a repeat; a wrong token is `403` |
 
 ## 5c. Checking the Supabase database
 
@@ -149,8 +172,9 @@ from public.verifications v join public.users u on u.id = v.user_id order by v.d
 -- staff roles, TOTP factors (Supabase Auth), notifications and the outbox
 select u.email, r.role from user_roles r join users u on u.id = r.user_id where r.revoked_at is null;
 select user_id, factor_type, status from auth.mfa_factors;
-select kind, critical, email_status, read_at is not null as read, created_at from notifications order by created_at desc limit 10;
-select topic, status, attempts, last_error from outbox_events order by created_at desc limit 10;
+select kind, priority, audience, delivery_mode, read_at is not null as read, expires_at, created_at from notifications order by created_at desc limit 10;
+select d.status, d.attempt_count, d.last_error_code, n.kind from notification_deliveries d left join notifications n on n.id = d.notification_id order by d.updated_at desc limit 10;
+select topic, status, attempts, last_error_code, dedupe_key from outbox_events order by created_at desc limit 10;
 select action, actor_role_snapshot, target_type, occurred_at from audit_events order by occurred_at desc limit 15;
 ```
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StaffError, claimTask, decide, getQueue, login, setCsrfToken, transitionReport } from './api';
+import { StaffError, assignTask, claimTask, decide, getDeliveries, getQueue, login, markInboxRead, removeSuppression, retryDelivery, setCsrfToken, transitionReport } from './api';
 
 type Call = [URL, RequestInit];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -85,5 +85,24 @@ describe('staff API client', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
     await expect(getQueue()).rejects.toBeInstanceOf(StaffError);
     await expect(getQueue()).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
+  });
+
+  it('notification operations use the right method, carry the CSRF token and never put addresses in the URL', async () => {
+    fetchMock = vi.fn(async (url: URL) => (url.pathname.endsWith('/csrf') ? json({ csrf_token: 'c.t' }) : json({ items: [], counts: {} })));
+    vi.stubGlobal('fetch', fetchMock);
+    await getDeliveries('ambiguous');
+    await retryDelivery('d-1', 'checked the provider');
+    await removeSuppression('s-1', 'asked to receive mail again');
+    await markInboxRead('n-1');
+    await assignTask('task-1', null);
+    const byPath = (part: string) => calls().find(([url]) => url.pathname.includes(part))!;
+    expect(byPath('notification-deliveries')[0].searchParams.get('status')).toBe('ambiguous');
+    expect(byPath('/retry')[1].method).toBe('POST');
+    expect(JSON.parse(String(byPath('/retry')[1].body))).toEqual({ reason: 'checked the provider' });
+    expect(byPath('notification-suppressions/s-1')[1].method).toBe('DELETE');
+    expect(header(byPath('notification-suppressions/s-1'), 'X-CSRF-Token')).toBe('c.t');
+    expect(byPath('/notifications/n-1')[1].method).toBe('PATCH');
+    expect(JSON.parse(String(byPath('/notifications/n-1')[1].body))).toEqual({ read: true });
+    expect(JSON.parse(String(byPath('/assign')[1].body))).toEqual({ user_id: null });
   });
 });

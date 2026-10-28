@@ -270,4 +270,75 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise NotImplementedError("0017 moves email state into new tables; restore from a backup instead")
+    """Back to the 0014 shape. Email state is folded back into the notification row; the attempt
+    history is copied back as far as the old table can hold it. Templates, rules, preferences,
+    suppressions, digests and provider events have no older home and are dropped."""
+    op.add_column("notifications", sa.Column("critical", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column("notifications", sa.Column("email_status", sa.String(10), nullable=False, server_default="none"))
+    op.add_column("notifications", sa.Column("email_attempts", sa.SmallInteger(), nullable=False, server_default="0"))
+    op.execute(
+        """
+        UPDATE notifications n SET
+          critical = (n.priority = 'critical'),
+          email_status = CASE
+            WHEN n.delivery_mode = 'digest' THEN 'digest'
+            WHEN x.status IS NULL THEN 'none'
+            WHEN x.status IN ('accepted', 'delivered') THEN 'sent'
+            WHEN x.status IN ('queued', 'sending') THEN 'pending'
+            WHEN x.status = 'ambiguous' THEN 'ambiguous'
+            ELSE 'failed' END,
+          email_attempts = COALESCE(x.attempt_count, 0)
+        FROM (
+          SELECT n2.id, d.status, d.attempt_count
+          FROM notifications n2 LEFT JOIN notification_deliveries d ON d.notification_id = n2.id
+        ) x
+        WHERE n.id = x.id
+        """
+    )
+    op.create_check_constraint(
+        "ck_notifications_email_status", "notifications", "email_status IN ('none', 'pending', 'sent', 'failed', 'ambiguous', 'digest')"
+    )
+    op.create_table(
+        "delivery_attempts",
+        sa.Column("id", UUID, primary_key=True),
+        sa.Column("notification_id", UUID, _fk("notifications", "CASCADE"), nullable=False),
+        sa.Column("channel", sa.String(10), nullable=False, server_default="email"),
+        sa.Column("provider", sa.String(20), nullable=False),
+        sa.Column("status", sa.String(10), nullable=False),
+        sa.Column("provider_message_id", sa.String(120)),
+        sa.Column("error", sa.String(300)),
+        sa.Column("attempted_at", TS, nullable=False, server_default=sa.func.now()),
+        sa.CheckConstraint("status IN ('sent', 'failed', 'ambiguous')", name="ck_delivery_attempts_status"),
+    )
+    op.create_index("ix_delivery_attempts_notification_id", "delivery_attempts", ["notification_id"])
+    op.execute(
+        """
+        INSERT INTO delivery_attempts (id, notification_id, channel, provider, status, provider_message_id, error, attempted_at)
+        SELECT a.id, d.notification_id, 'email', COALESCE(d.provider, 'unknown'),
+          CASE a.outcome WHEN 'accepted' THEN 'sent' WHEN 'ambiguous' THEN 'ambiguous' ELSE 'failed' END,
+          left(a.provider_message_id, 120), a.redacted_error_summary, a.started_at
+        FROM notification_delivery_attempts a JOIN notification_deliveries d ON d.id = a.delivery_id
+        WHERE d.notification_id IS NOT NULL AND a.outcome <> 'skipped'
+        """
+    )
+    op.execute("ALTER TABLE public.delivery_attempts ENABLE ROW LEVEL SECURITY")
+
+    for table in ("notification_provider_events", "notification_delivery_attempts", "notification_deliveries"):
+        op.drop_table(table)
+    op.drop_index("ix_notifications_digest_queue", table_name="notifications")
+    op.drop_index("ix_notifications_expires_at", table_name="notifications")
+    for name in ("ck_notifications_priority", "ck_notifications_audience", "ck_notifications_delivery_mode"):
+        op.drop_constraint(name, "notifications", type_="check")
+    for column in ("priority", "audience", "template_key", "template_version", "delivery_mode", "digest_id", "archived_at", "expires_at"):
+        op.drop_column("notifications", column)
+    for table in ("notification_digests", "notification_templates", "notification_rules", "notification_preferences", "notification_suppressions"):
+        op.drop_table(table)
+
+    op.drop_constraint("ck_outbox_events_status", "outbox_events", type_="check")
+    op.execute("UPDATE outbox_events SET status = 'done' WHERE status = 'processed'")
+    op.execute("UPDATE outbox_events SET status = 'failed' WHERE status = 'dead_letter'")
+    op.execute("UPDATE outbox_events SET status = 'pending' WHERE status = 'retry'")
+    op.create_check_constraint("ck_outbox_events_status", "outbox_events", "status IN ('pending', 'processing', 'done', 'failed')")
+    op.drop_constraint("uq_outbox_events_dedupe_key", "outbox_events", type_="unique")
+    for column in ("dedupe_key", "aggregate_type", "aggregate_version", "recipient_policy", "occurred_at", "lease_owner", "last_error_code"):
+        op.drop_column("outbox_events", column)

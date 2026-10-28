@@ -13,6 +13,7 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerificationPage } from './pages/VerificationPage';
 import { AppealsPage } from './pages/AppealsPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { GuestEntryPage } from './pages/GuestEntryPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { DestinationsPage } from './pages/DestinationsPage';
@@ -53,6 +54,7 @@ export const App: React.FC = () => {
                 <Route path="health" element={<HealthCheckPage />} />
                 <Route path="account/verification" element={<VerificationPage />} />
                 <Route path="account/appeals" element={<AppealsPage />} />
+                <Route path="account/notifications" element={<NotificationsPage />} />
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />

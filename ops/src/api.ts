@@ -92,6 +92,11 @@ export function describeError(error: unknown, lang: 'bn' | 'en'): string {
       'The ops API is off: OPS_DASHBOARD_TOKEN is not set on the server.',
     );
   if (error.status === 429) return t('অনেকবার ভুল টোকেন। এক ঘণ্টা পরে চেষ্টা করুন।', 'Too many failed attempts. Try again within the hour.');
-  if (error.status === 503) return t('Redis পাওয়া যাচ্ছে না।', 'Redis is not reachable.');
+  // 503 means the API answered but a dependency failed: the database or Redis (the API logs say which).
+  if (error.status === 503)
+    return t(
+      'API চলছে কিন্তু ডেটাবেস বা Redis-এ সংযোগ হচ্ছে না। সার্ভারের লগ ও DATABASE_URL / REDIS_URL দেখুন।',
+      'The API is up but cannot reach its database or Redis. Check the server logs and DATABASE_URL / REDIS_URL.',
+    );
   return t(`ত্রুটি: ${error.code}`, `Error: ${error.code}`);
 }

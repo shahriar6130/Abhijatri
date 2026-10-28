@@ -361,16 +361,29 @@ export type AuthSession =
       auth_time: string;
     };
 
-/** API.md 5.19: in-app notifications. */
+/** API.md 5.21: one item of the notification inbox. */
 export interface AppNotification {
   id: string;
   kind: string;
+  /** The first part of the kind: content, account, verification, appeal, report, moderation, staff, security, notification. */
+  category?: string;
+  priority?: 'critical' | 'high' | 'normal' | 'low';
   critical: boolean;
+  audience?: 'member' | 'staff';
   title: { bn: string; en: string };
   body: { bn: string; en: string };
   link: string | null;
   created_at: string;
   read: boolean;
+  archived?: boolean;
+}
+
+/** API.md 5.21: how standard (non-critical) email arrives. Critical and high-priority notices are always immediate. */
+export interface NotificationPreferences {
+  standard_email_mode: 'immediate' | 'digest' | 'off';
+  digest_timezone: string;
+  digest_local_time: string;
+  always_immediate: string[];
 }
 
 export interface VerificationCaseView {

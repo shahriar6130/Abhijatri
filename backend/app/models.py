@@ -337,6 +337,7 @@ class AuthSessionActivity(Base):
     """Last request per Supabase session, for the superadmin inactivity limit (spec 4.1)."""
 
     __tablename__ = "auth_session_activity"
+    __table_args__ = (Index("ix_auth_session_activity_user", "user_id"),)
 
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -612,6 +613,7 @@ class OutboxEvent(Base):
     __tablename__ = "outbox_events"
     __table_args__ = (
         CheckConstraint("status IN ('pending', 'processing', 'processed', 'retry', 'dead_letter')", name="ck_outbox_events_status"),
+        Index("ix_outbox_events_relay", "status", "available_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -883,7 +885,7 @@ class Appeal(Base):
             "num_nonnulls(moderation_action_id, enforcement_case_id, verification_case_id) = 1", name="ck_appeals_one_target"
         ),
         # one appeal per decision: a decided appeal cannot be filed again; a withdrawn one can
-        Index("uq_appeals_action", "moderation_action_id", unique=True, postgresql_where=text("moderation_action_id IS NOT NULL AND state <> 'withdrawn'")),
+        Index("uq_appeals_moderation", "moderation_action_id", unique=True, postgresql_where=text("moderation_action_id IS NOT NULL AND state <> 'withdrawn'")),
         Index("uq_appeals_enforcement", "enforcement_case_id", unique=True, postgresql_where=text("enforcement_case_id IS NOT NULL AND state <> 'withdrawn'")),
         Index("uq_appeals_verification", "verification_case_id", unique=True, postgresql_where=text("verification_case_id IS NOT NULL AND state <> 'withdrawn'")),
     )

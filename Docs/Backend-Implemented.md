@@ -802,6 +802,7 @@ Owner decisions: any signed-in member may attach media (not only Verified Member
 - `POST /reviews/member` (`app/services.py::submit_member_review`): the review is owned by the account (`author_user_id`), uses the same draft id and receipt recovery as guests, needs the session and CSRF token instead of Turnstile, and allows one active review per member, destination and visit month (`409 MEMBER_REVIEW_EXISTS`).
 - Media (`app/media.py`, migration `0016_review_media`, private bucket `review-media`): upload intent → browser PUT to a signed URL → `complete`, where the server reads the real file. Photos: JPEG/PNG/WebP only, at most 8 MiB and 20 megapixels, re-encoded to WebP without EXIF/GPS (Pillow). Video: MP4 with H.264 + AAC, at most 50 MiB and 60 s; metadata boxes and extra tracks are blanked in place. Bad files are deleted at once with a field code (`BROKEN`, `TYPE`, `TOO_LARGE`, `TOO_MANY_PIXELS`, `TOO_LONG`, `VIDEO_CODEC`, `NOT_UPLOADED`).
 - Moderation: the queue shows pending media; `rejected_media_ids` on a PUBLISH decision rejects single items; REJECT rejects all; states and the audit record commit with the decision. Staff preview through five-minute links.
+- Corrections (added after a photo was rejected by a mis-ticked box): `GET /admin/media` and `POST /admin/media/{media_id}/decision` let staff approve or reject a decided photo or video, audited as `media.approve` / `media.reject`; the staff decision form now shows a ticked "Publish" box per file instead of a "must not be published" box; staff Media tab.
 - Public feed: `author_display_name` for member reviews and approved `media` with one-hour signed links. Retention purges uploads not completed within 24 hours.
 - Screens: the review form (members post under their account name, choose up to 5 photos and 1 video with description and ownership tick, see upload progress and any refused file on the receipt), a gallery on review cards, and media preview plus per-item rejection in the staff queue.
 - Tests: `tests/test_media.py` (17: EXIF/GPS removal, scaling, SVG/GIF/oversized/truncated images, MP4 metadata stripping with unchanged offsets, too long, HEVC, non-MP4, the full submit → upload → moderate → feed flow, upload rules, rejection, abandoned purge). Backend 454 passing; frontend 56 and staff 23 vitest passing; both apps build.
@@ -809,4 +810,22 @@ Owner decisions: any signed-in member may attach media (not only Verified Member
 **Still open**
 - ~~Migration `0016_review_media` on the online database~~ Applied 27 Oct 2026 (owner approved); a photo and a video were uploaded through online Storage and a GIF posing as JPEG was refused (`TYPE`).
 - No video poster image or low-bitrate rendition (no transcoding by decision); approved media of a later hidden or removed review stay stored until the review is deleted.
+
+### 5.17 Notification system v1.1 (28 October 2026)
+
+Implements `Docs/Notification-Documentation.md` in full; its section 14 is ticked with the evidence for each item.
+
+**Built and tested**
+- Migration `0017_notification_system`: outbox fields and statuses, notification priority/audience/template/delivery mode/archive/expiry, and the tables `notification_deliveries`, `notification_delivery_attempts`, `notification_provider_events`, `notification_templates`, `notification_rules`, `notification_preferences`, `notification_suppressions`, `notification_digests`. Existing email state and attempt history are carried over (checked on a copy with old rows); RLS on, no browser-role grants.
+- `app/notify/`: `registry.py` (catalogue: every spec 3 event), `events.py` (producers, dedupe, captured staff), `messages.py` (resolvers, role re-check, templates), `worker.py` (relay with lease owner, retry, dead letter, start-up defaults), `delivery.py` (deliveries, attempts, retry schedule, suppressions, current verified address, crash reconciliation, per-person digest), `alerts.py` (lease expiring, queue overdue, escalation, repeated denials, failure/backlog/webhook thresholds, deduplicated), `webhooks.py` (Resend and Brevo), `admin_routes.py` (superadmin monitoring, retry, suppressions, templates, rules).
+- New events: review decisions carry the decision and author; staff role changes, escalations, assignments (new `POST /admin/tasks/{id}/assign`), password changes (security notice), clarification questions.
+- Member API: cursor inbox, unread count, PATCH read/archive, mark-all-read, preferences; SSE kept as a hint.
+- Retention: per-row expiry with open-appeal preservation; processed outbox rows after 30 days.
+- Ops dashboard: new Notifications panel (independent of the worker); the Members panel now reads `user_roles` and shows sign-in as live.
+- Screens: public `/account/notifications` (inbox, filters, archive, email preferences) and a bell that refetches after a reconnect; staff Inbox tab, superadmin Notifications tab (outbox, deliveries with attempts and retry, suppressions, templates and rules), Assign control in the queue.
+- Tests: `tests/test_notifications.py` (26) plus updated `test_cases.py`, `test_rls.py` (grants), `test_ops.py`. Backend 481 passing; public app 59 and staff 24 vitest passing; both apps build.
+
+**Still open**
+- ~~Apply `0017` online~~ Applied 28 Oct 2026 (owner approved): old rows carried over, RLS on, no browser grants; live check on the online project created a member receipt (email off by preference) and a superadmin staff notice.
+- Configure `RESEND_WEBHOOK_SECRET` or `BREVO_WEBHOOK_TOKEN` and point the provider's webhook at `/api/v1/webhooks/notifications/{provider}` once a real email provider is live.
 

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { BadgeCheck, FileUp, ShieldQuestion } from 'lucide-react';
 import { EVIDENCE_MAX_BYTES, EVIDENCE_TYPES, getMyVerification, requestVerification, respondToVerification, uploadEvidence, withdrawVerification } from '../api/account';
 import { Notice, accountErrorMessage, linkClass, primaryButtonClass } from '../components/auth/AccountUi';
+import { LoadingState } from '../components/common/StatusViews';
 import { useLanguage } from '../context/LanguageContext';
 import { useSession } from '../context/SessionContext';
 import type { VerificationCaseView } from '../types';
@@ -20,7 +21,7 @@ const STATE_TEXT: Record<VerificationCaseView['state'], [string, string]> = {
 /** Request the Verified Member badge (Moderation spec 6.2): a statement, a private evidence file, staff review. */
 export const VerificationPage: React.FC = () => {
   const { t } = useLanguage();
-  const { session, refresh } = useSession();
+  const { session, refresh, status } = useSession();
   const [data, setData] = useState<{ verified_member: boolean; case: VerificationCaseView | null } | null>(null);
   const [statement, setStatement] = useState('');
   const [answer, setAnswer] = useState('');
@@ -53,6 +54,8 @@ export const VerificationPage: React.FC = () => {
       setBusy(false);
     }
   };
+
+  if (status === 'loading') return <LoadingState />; // still reading the session
 
   if (session.kind !== 'member') {
     return (

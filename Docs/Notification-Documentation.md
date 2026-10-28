@@ -3,6 +3,7 @@
 
 **Stack:** Frontend + separate backend/API + Supabase PostgreSQL  
 **Channels in v1:** In-app notifications and email  
+**Implementation status (28 October 2026):** implemented in full, see section 15. API in `Docs/api/API.md` 5.21, tables in `Docs/Schema.md`, decisions in `Docs/Decisions.md`.
 **Policy decisions locked:** Current verified email; 90-day standard retention / 24-month critical retention; preserve notifications linked to open appeals; appeals for all policy-eligible decisions; event-based staff recipient resolution; daily digest.
 
 
@@ -506,22 +507,39 @@ Enforce expiry policy, open-appeal preservation, 30-day processed-outbox cleanup
 
 ## 14. Acceptance checklist
 
-- [ ] Business state, audit row, and outbox event commit atomically.
-- [ ] Duplicate/replayed events create one logical inbox notification per recipient/kind.
-- [ ] Email delivery is described honestly as at-least-once/best-effort, with ambiguous outcomes tracked.
-- [ ] Each email attempt has a history row.
-- [ ] Provider webhook signatures and duplicate events are handled.
-- [ ] Current verified email is used at send time.
-- [ ] Daily digest never delays critical events and is idempotent.
-- [ ] Standard/critical expiry rules are applied per row.
-- [ ] Notifications linked to open appeals are preserved.
-- [ ] Every policy-eligible decision offers an appeal route and deadline.
-- [ ] Role changes do not leak restricted information to revoked staff.
-- [ ] RLS and SQL grants are tested for every role.
-- [ ] Realtime outage does not lose notifications.
-- [ ] Admin retries, template activation, and suppression changes are audited.
-- [ ] Failure alerts are deduplicated and independent monitoring exists.
-- [ ] No sensitive documents, secrets, or unredacted message bodies appear in logs.
+Evidence is the automated test (backend: `backend/tests/`, run on PostgreSQL) or the file that implements it.
+
+- [x] Business state, audit row, and outbox event commit atomically. — `app/notify/events.py::emit` runs in the business transaction; `test_notifications.py::test_a_rolled_back_decision_leaves_no_event`, `test_admin.py::test_a_decision_writes_action_audit_and_outbox_together`, `test_a_stale_version_is_a_conflict_and_changes_nothing`.
+- [x] Duplicate/replayed events create one logical inbox notification per recipient/kind. — `uq_notifications_identity`, `dedupe_key`; `test_two_workers_create_one_notification`, `test_events_wait_for_a_stopped_worker_and_are_deduplicated`, `test_cases.py::test_events_become_notifications_once_and_critical_ones_are_emailed`.
+- [x] Email delivery is described honestly as at-least-once/best-effort, with ambiguous outcomes tracked. — `app/notify/delivery.py`; `test_a_crash_after_the_provider_call_is_recorded_as_ambiguous`, `test_cases.py::test_an_unclear_send_is_ambiguous_and_a_failure_is_retried`.
+- [x] Each email attempt has a history row. — `notification_delivery_attempts`; `test_retries_follow_the_schedule_then_fail_permanently`.
+- [x] Provider webhook signatures and duplicate events are handled. — `app/notify/webhooks.py`; `test_resend_webhooks_are_verified_and_deduplicated`, `test_brevo_webhooks_need_the_token`.
+- [x] Current verified email is used at send time. — `test_the_current_verified_address_is_used_at_send_time`.
+- [x] Daily digest never delays critical events and is idempotent. — `delivery.build_digests` (unique recipient + local day); `test_the_digest_is_sent_once_at_the_local_time`, `test_preferences_choose_standard_email_but_never_delay_critical`.
+- [x] Standard/critical expiry rules are applied per row. — `notifications.expires_at`; `test_events_wait_for_a_stopped_worker_and_are_deduplicated` (90 days), `test_two_workers_create_one_notification` (24 months), `test_cases.py::test_old_notifications_are_purged_by_class`.
+- [x] Notifications linked to open appeals are preserved. — `retention.purge_notifications`; `test_expired_notifications_linked_to_an_open_appeal_are_kept`.
+- [x] Every policy-eligible decision offers an appeal route and deadline. — appealable notices link to `/account/appeals` and say "appeal within 30 days"; the receipt carries the reference and deadline (`registry.py`); `test_template_versions_are_validated_activated_and_audited`, `test_cases.py::test_appeal_received_independent_review_and_overturn`.
+- [x] Role changes do not leak restricted information to revoked staff. — staff notices re-checked at creation and hidden from people without a role; `test_a_revoked_moderator_is_told_but_loses_staff_notices`, `test_staff_captured_at_event_time_are_rechecked_before_delivery`.
+- [x] RLS and SQL grants are tested for every role. — `test_rls.py::test_every_public_table_has_row_level_security` (RLS on every table, no grants to `anon`/`authenticated`); members reach only their own rows through the API (`test_inbox_pages_marks_read_archives_and_counts`); superadmin-only routes refuse moderators (`test_superadmins_retry_only_retryable_deliveries_and_it_is_audited`).
+- [x] Realtime outage does not lose notifications. — the inbox is persisted first; the bell refetches after a reconnect and shows a "reconnecting" state (`frontend/src/components/layout/NotificationBell.tsx`); the staff inbox polls every 30 s.
+- [x] Admin retries, template activation, and suppression changes are audited. — `test_superadmins_retry_only_retryable_deliveries_and_it_is_audited`, `test_template_versions_are_validated_activated_and_audited`, `test_suppressed_addresses_are_skipped_and_suppressions_are_audited`, `test_a_rule_can_turn_email_off_but_not_invent_recipients`.
+- [x] Failure alerts are deduplicated and independent monitoring exists. — `app/notify/alerts.py` (one alert per window, also logged at ERROR); the ops dashboard's Notifications panel (`app/ops/providers/notifications.py`) reads the tables directly; `test_scanners_alert_once_per_window`, `test_repeated_denials_alert_superadmins`.
+- [x] No sensitive documents, secrets, or unredacted message bodies appear in logs. — `test_logs_never_contain_addresses_or_bodies`, `test_log_redaction.py`; webhooks keep a redacted payload only.
 
 ---
 
+## 15. Implementation notes (28 October 2026)
+
+| Spec item | Where | Note |
+|---|---|---|
+| 7.1 `notification_outbox` | `outbox_events` (migration `0017`) | The existing shared outbox was extended rather than duplicated (section 7 asks to reuse): `topic` = `event_type`, `available_at` = `next_attempt_at`, `lease_until` = `lease_expires_at`. |
+| 7.2 `notifications` | `notifications` | Bangla and English are stored side by side (the UI is bilingual) instead of one `locale` column; `audience` hides staff notices from people who lost the role. |
+| 7.3 to 7.10 | new tables in `0017` | As specified. Digest membership is `notifications.digest_id` (the spec allows a join instead of an array). |
+| 3 Event catalogue | `app/notify/registry.py` | Every listed event has a rule. `verification.expired` and `account.removal_requested` have no workflow in v1 and are never emitted. Extra kinds kept from earlier work: `content.removed`, `account.case_opened`, `account.warning`, `account.restricted`, `account.restriction_lifted`, `report.actioned`, `report.dismissed`, `staff.verification_submitted`, `staff.role_changed`. |
+| 5 Recipients | `app/notify/messages.py` | Allowlisted resolvers only: a person named in the event, or staff captured at event time and re-checked for their current role. |
+| 7.6 Templates | `notification_templates` | Version 1 of every text ships in code and is stored at start-up; superadmins add and activate later versions. Only the variables of that template are allowed. |
+| 7.7 Rules | `notification_rules` | Live tuning only (priority, email on/off, enabled); events, recipients and routes cannot be added from the database. |
+| 8 Retries | `app/notify/delivery.py` | 1 min, 5 min, 30 min, 2 h with ±10 % jitter, then `failed_permanently`; 4xx (except 429) is permanent at once. |
+| 9 API | `app/member_routes.py`, `app/notify/admin_routes.py`, `app/notify/webhooks.py` | Paths are under `/api/v1`; preferences at `/notification-preferences`. |
+| 10 Supabase | migrations | The browser never talks to Supabase: RLS is on and `anon`/`authenticated` have no grants on any table, which is stricter than "members read their own rows". |
+| 12 UI | public `/account/notifications` and the bell; staff Inbox and Notifications tabs | |
