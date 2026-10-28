@@ -2,6 +2,14 @@
 
 This log records build-time decisions without reopening the frozen Review specification.
 
+## 2026-10-28 (Unavailable features and bilingual fixes)
+
+| Decision | Rule | Reason |
+|---|---|---|
+| Features without a backend | Planner, offline packs and saved trips show `FeatureUnavailable` (what it will do, its Gantt task, what works today) and stay in navigation with a "Soon" tag. No invented data, no calls to missing APIs. | QA_UI_UX 1 and 2; "no fake live claims" (Gantt C08). |
+| Language-scoped typography | English font and tracking apply only to text that is itself English; Bangla is never tracked. | UI-Architecture U1, U16; measured -0.93 px on Bangla. |
+| Guarded preference storage | Language and theme preferences use `utils/safeStorage.ts`; a blocked store falls back to defaults for the session. | UI-Architecture U12 (blocked storage blanked the app). |
+
 ## 2026-10-28 (Notification system v1.1)
 
 Implements `Docs/Notification-Documentation.md` in full (owner request, 28 Oct 2026). Details: API.md 5.21, Schema.md, the spec's own section 15.

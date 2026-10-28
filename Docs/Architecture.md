@@ -214,9 +214,9 @@ Browser (Vite + React 18 + TypeScript)
 | `/overview` | `OverviewPage` | Live counts (destinations, advisories in effect, published Guest reviews) and destinations with advisories, from `GET /destinations` | Proposal Section 1 |
 | `/destinations` | `DestinationsPage` | Published destinations from `GET /destinations`, bilingual text filter, loading/error/empty states | O2, FR01, R03 |
 | `/destinations/:id` | `DestinationDetailPage` | Profile from `GET /destinations/{id}`: advisories with state and source, seasonality, guide items, restrictions, contacts, published review feed | FR01, FR15, R03 |
-| `/planner` | `PlannerPage` | **Prototype** (E08): prototype destination list; calls a planned estimate endpoint | O3, FR08, FR09 |
-| `/offline-packs` | `OfflinePacksPage` | **Prototype** (R13): no storage behind it yet | O4, FR10, FR17 |
-| `/trips` | `SavedTripsPage` | **Prototype** (E09): `localStorage` briefs | FR11 |
+| `/planner` | `PlannerPage` | **Not available yet** (E06 to E08): honest placeholder via `FeatureUnavailable`; no estimate is calculated or requested | O3, FR08, FR09 |
+| `/offline-packs` | `OfflinePacksPage` | **Not available yet** (R12, R13): placeholder; nothing is stored | O4, FR10, FR17 |
+| `/trips` | `SavedTripsPage` | **Not available yet** (E09): placeholder | FR11 |
 | `/reviews` | `ReviewsPage` | Guest review submission with client-generated receipt, receipt shown once, status and withdrawal | O5, FR04, FR13, R09 |
 | `/health` | `HealthCheckPage` | Real-time diagnostic console testing `GET /api/v1/health` & readiness | Acceptance testing |
 
@@ -231,7 +231,7 @@ The frontend network and data layer is organized into isolated, domain-focused A
 | `src/api/destinations.ts` | `listDestinations()`, `listAllDestinations()`, `getDestination(id)` | Public R02 reads (API.md 5.12, 5.13). |
 | `src/api/reviews.ts` | `getReviewFeed()`, `submitGuestReview()`, `getReceiptStatus()`, `withdrawGuestReview()`, `generateReceipt()`, `getGuestScopeSecret()`, `CONSENT_VERSION` | Guest review lifecycle (API.md 5.1 to 5.4, 5.8; PF 13). Secrets travel only in JSON bodies. |
 | `src/api/index.ts` | Barrel export of the four modules above | Unified entrypoint (`import { ... } from '../api'`). |
-| `src/data/prototypeDestinations.ts` | `PROTOTYPE_DESTINATIONS` | Unsourced prototype data for the planner, offline-packs and saved-trips screens only. Not an API module; delete when those screens migrate. |
+| `src/components/common/FeatureUnavailable.tsx` | `FeatureUnavailable` | Placeholder for a feature without a backend: what it will do, the Gantt task, what works today. `src/data/prototypeDestinations.ts` was deleted on 28 Oct 2026. |
 
 Implementation status and evidence: `Docs/Frontend-Implemented.md`.
 

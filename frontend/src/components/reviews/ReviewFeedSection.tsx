@@ -2,13 +2,22 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, MessageSquarePlus, Star } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
-import { getReviewFeed } from '../../api/reviews';
+import { detectReviewLanguage, getReviewFeed } from '../../api/reviews';
 import type { CategoryAverage, PublicReview } from '../../types';
 import { formatNumber, formatTimestamp } from '../../utils/format';
 import { describeError, EmptyState, ErrorState, LoadingState } from '../common/StatusViews';
 import { CategoryAverages, CategoryChips } from '../destination/CategoryAverages';
 import { ReportReview } from './ReportReview';
 import { ReviewMediaGallery } from './ReviewMediaGallery';
+
+/**
+ * The feed (API.md 5.8) does not return the review's declared language, so tag it by the script it
+ * is written in. Mixed text inherits the page language. Replace with the API field once it exists.
+ */
+function reviewLang(review: PublicReview): 'bn' | 'en' | undefined {
+  const detected = detectReviewLanguage(`${review.title} ${review.body}`);
+  return detected === 'BN' ? 'bn' : detected === 'EN' ? 'en' : undefined;
+}
 
 const PAGE_SIZE = 10;
 
@@ -108,7 +117,10 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
           {items.map((review) => (
             <li key={review.id} className="tonal-card p-5 flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant dark:text-on-dark-muted">
-                <span className="inline-flex items-center gap-0.5" aria-label={t(`${review.overall_rating} তারকা`, `${review.overall_rating} out of 5 stars`)}>
+                <span className="inline-flex items-center gap-0.5" aria-label={t(
+                    `৫-এর মধ্যে ${formatNumber(review.overall_rating, language)} তারকা`,
+                    `${review.overall_rating} out of 5 stars`,
+                  )}>
                   {[1, 2, 3, 4, 5].map((n) => (
                     <Star
                       key={n}
@@ -131,8 +143,9 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
                 <span className="ml-auto">{formatTimestamp(review.published_at, language)}</span>
               </div>
               {/* Plain text only: React escapes it, and user HTML is never rendered (Review.md 10). */}
-              <h3 className="text-base font-bold font-title text-on-surface dark:text-on-dark">{review.title}</h3>
-              <p className="text-sm font-body leading-relaxed text-on-surface dark:text-on-dark whitespace-pre-line">{review.body}</p>
+              {/* Each review keeps its own language, not the page's (UI-Architecture L6, U3). */}
+              <h3 lang={reviewLang(review)} className="text-base font-bold font-title text-on-surface dark:text-on-dark">{review.title}</h3>
+              <p lang={reviewLang(review)} className="text-sm font-body leading-relaxed text-on-surface dark:text-on-dark whitespace-pre-line">{review.body}</p>
               <ReviewMediaGallery media={review.media} />
               <CategoryChips ratings={review.category_ratings} />
               <ReportReview reviewId={review.id} />

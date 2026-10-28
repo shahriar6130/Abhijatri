@@ -17,3 +17,7 @@ Public destination and Guest-review screens have good basic loading/error states
 ## Suggested next step
 
 Hide or label the planner/offline routes as unavailable until their APIs/PWA storage exist, then run a browser and keyboard/screen-reader pass at mobile and desktop breakpoints.
+
+## Resolution (28 October 2026)
+
+Issues 1 to 4 are resolved: the offline, planner and saved-trip screens are replaced by an honest "not available yet" screen (no claims, no API calls, no prototype controls). Details: `Docs/Frontend-Implemented.md` section 5a.
