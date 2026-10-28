@@ -53,7 +53,7 @@ def upgrade() -> None:
     op.create_index("ix_audit_events_actor", "audit_events", ["actor_user_id"])
     op.execute(
         """
-        CREATE FUNCTION audit_events_are_append_only() RETURNS trigger AS $$
+        CREATE OR REPLACE FUNCTION audit_events_are_append_only() RETURNS trigger AS $$
         BEGIN
           RAISE EXCEPTION 'audit_events is append-only';
         END;
