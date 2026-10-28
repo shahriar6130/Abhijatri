@@ -69,9 +69,25 @@
   font-family: var(--font-body) !important;
 }
 
-.font-en, [lang="en"] {
+/*
+ * English typography follows the language of the text, never the page (UI-Architecture U1, U16).
+ * The old rule matched <html lang="en">, so in English mode letter-spacing -0.06em was inherited by
+ * every element, Bangla included, and Bangla became visibly cramped.
+ */
+.font-en,
+:not(html)[lang="en"] {
   font-family: var(--font-en) !important;
-  letter-spacing: var(--letter-spacing-en) !important;
+}
+
+:lang(en).font-en,
+:not(html)[lang="en"] {
+  letter-spacing: var(--letter-spacing-en);
+}
+
+/* Bangla is never tightened or spaced out: tracking separates conjuncts and vowel signs. */
+:lang(bn):is(h1, h2, h3, h4, h5, h6),
+:lang(bn)[class*="tracking-"] {
+  letter-spacing: normal !important;
 }
 
 /* Accessibility: Focus rings */

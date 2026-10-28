@@ -176,6 +176,30 @@ The Sajek advisory "Road blockade eased until 21 October" is time-bound and expi
 | D13 | After a failed submit the page stayed where the Submit button is, so errors higher up the long form went unseen. | No scroll or focus handling on failure. | Every failed submit (client checks or server response) scrolls the topmost error to the centre of the screen (instant when reduced motion is requested) and focuses its field; a star rating focuses its first star; a form-level error with no field focuses the message itself. | Browser run 20 Oct 2026, submitting from the bottom of the page: empty form focused Destination; missing rating focused "1 star"; server `409 RESERVED_DISPLAY_NAME` focused Display name; server `503 GUEST_WRITES_PAUSED` focused the alert. Each was in view below the header. |
 | D14 | Large cards (the review form, detail panels) jittered when the cursor rested near their edge. | `.tonal-card:hover` lifted every card by 2 px; the lift moved the edge out from under the cursor, hover ended, the card dropped back, and the cycle repeated. Found because the test could not click a "stable" Submit button. | The lift now applies only to cards that are links (`a.tonal-card`). | Two consecutive browser runs clicked Submit without instability. |
 
+## 5a. QA and F03 audit fixes (28 October 2026)
+
+Sources: `QA_UI_UX.md`, `QA_FRONTEND.md` (28 Oct) and `Docs/UI-Architecture.md` section 8.
+
+| Item | Fix |
+|---|---|
+| QA UI/UX 1 (High): offline screen claimed "100% offline", "Airplane Mode Ready" | `OfflinePacksPage` replaced by `FeatureUnavailable`: says nothing is stored yet, what packs will do (R12, R13), and links to the guides |
+| QA UI/UX 2 and Frontend 1 (High): planner called the missing `/api/v1/estimates` | `PlannerPage` replaced by a placeholder; it makes no API call |
+| QA UI/UX 3, 4: planner range and tier controls, saved-trip delete icon | Removed with the prototypes; rebuilt accessibly with E08 and E09 |
+| QA Frontend 2: nine npm advisories | Already resolved by the Vite 8 / Vitest 5 upgrade: `npm audit` reports 0 in `frontend`, `ops` and `staff` |
+| QA Frontend 3: prototype slugs bypass live data | `src/data/prototypeDestinations.ts` and the prototype types deleted; no page uses slug ids |
+| Sidebar | "Soon" tag on the three unavailable items; consistent names ("System status" / "সিস্টেম স্ট্যাটাস") |
+| U1, U16 | English font and tracking apply only to text that is itself English; Bangla headings and `tracking-*` utilities never tighten Bangla (`global.css`) |
+| U3 | Each published review carries its own `lang` (detected from its script) |
+| U4, U5, U9, U10, U11 | Paired menu-button and status-pill names, `aria-expanded`, 44 px targets, paired brand subtitle; unwired search removed; language switch named by its visible word |
+| U6 | System status page fully bilingual; time in Dhaka with the interface locale |
+| U12 | `utils/safeStorage.ts`: blocked or full storage no longer blanks the app |
+| U13, U14 | Whole bilingual sentences for counts; Review.md term "Seeded Destination Selection"; star labels with locale digits and the scale |
+| U17 | `<html lang>` set before any request, so the first `Accept-Language` is right |
+
+Evidence (28 Oct 2026): `npm test` 64 passed (8 files; 3 new for `safeStorage`); `npm run build` clean. Browser run in Edge with the API stubbed: storage blocked still renders; planner makes no `/estimates` request; no "Airplane Mode Ready"; three "Soon" tags; Bangla `h1` letter-spacing `normal`; a Bangla review in English mode `normal` (was -0.93 px); reviews tagged `bn` and `en`; menu and status names in Bangla; language button 44 px; no horizontal overflow at 390 px.
+
+Open: U2 (self-hosted fonts, waits for decision Q2), U15 (review labels from `GET /review-parameters`), QA Frontend 4 (no browser E2E tests in CI).
+
 ## 6. Defects found, reported to their owners, not fixed here
 
 | # | Finding | Owner | Detail |
@@ -215,5 +239,5 @@ All runs were local against an embedded PostgreSQL 16 server (the project target
 | Self-hosted fonts (CSP `style-src 'self'`, 40 KiB Bangla font budget) | F03 or R12 |
 | Frontend lint in CI (unit tests now run through `npm test`) | PF 27 item 2 |
 | Sending `category_ratings`; uploading photos through media intents | R07 and the media pipeline (Review.md A1, A2) |
-| Planner, offline packs and saved trips still use prototype data | E08, R13, E09 |
+| Planner, offline packs and saved trips (placeholders since 28 Oct 2026) | E06–E08, R12–R13, E09 |
 | Public deployment. `frontend/vercel.json` is ready; deploying and adding the Vercel origin to the API's `CORS_ALLOWED_ORIGINS` is with Shahriar Islam (`Architecture.md` section 5). | Interim Vercel deploy |
