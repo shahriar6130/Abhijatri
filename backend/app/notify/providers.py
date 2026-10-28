@@ -2,14 +2,18 @@
 
 - ``mailpit``: the local development inbox (http://127.0.0.1:54324); nothing leaves the machine.
 - ``resend``: production, over HTTPS with an ``Idempotency-Key`` so a retried send is not delivered twice.
+- ``gmail``: the Gmail API over HTTPS, sending as the authorised Gmail account (no SMTP port needed).
 - ``recording``: tests.
 
 A provider returns the provider's message id, raises ``SendFailed`` when the message was certainly not
 accepted, and raises ``SendAmbiguous`` when it may have been (a timeout after the request was sent).
 """
 
+import base64
 import smtplib
 import ssl
+import threading
+import time
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import make_msgid
@@ -194,6 +198,72 @@ class RecordingProvider:
         return f"rec-{len(self.sent)}"
 
 
+class GmailProvider:
+    """Sends through the Gmail API (HTTPS, port 443) as the account that authorised the app.
+
+    Railway blocks outbound SMTP below the Pro plan; HTTPS is not blocked. A refresh token (from
+    ``python -m app.jobs.gmail_authorize``) is exchanged for a short-lived access token, cached until
+    shortly before it expires. Scope: ``gmail.send`` only (cannot read the mailbox). Limit: about
+    500 recipients a day for a personal account.
+    """
+
+    name = "gmail"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 - an endpoint, not a secret
+    SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    _lock = threading.Lock()
+    _token: tuple[str, float] | None = None  # (access token, expiry as monotonic time), shared per process
+
+    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+        self._transport = transport
+
+    def _access_token(self, client: httpx.Client) -> str:
+        with GmailProvider._lock:
+            if GmailProvider._token and GmailProvider._token[1] > time.monotonic() + 60:
+                return GmailProvider._token[0]
+            settings = get_settings()
+            response = client.post(
+                self.TOKEN_URL,
+                data={
+                    "client_id": settings.gmail_client_id or "",
+                    "client_secret": settings.gmail_client_secret or "",
+                    "refresh_token": settings.gmail_refresh_token or "",
+                    "grant_type": "refresh_token",
+                },
+            )
+            if response.status_code != 200:
+                # invalid_grant means the token was revoked or expired: fix the configuration, then the retry works.
+                raise SendFailed(f"gmail token {response.status_code}", code="gmail_token")
+            body = response.json()
+            GmailProvider._token = (str(body["access_token"]), time.monotonic() + float(body.get("expires_in", 3600)))
+            return GmailProvider._token[0]
+
+    def send(self, email: Email) -> str:
+        settings = get_settings()
+        message = EmailMessage()
+        message["From"] = settings.email_from
+        message["To"] = email.to
+        message["Subject"] = email.subject
+        message["Message-ID"] = make_msgid(domain="abhijatri")
+        message["X-Abhijatri-Key"] = email.idempotency_key
+        message.set_content(email.text)
+        message.add_alternative(email.html, subtype="html")
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+        try:
+            with httpx.Client(timeout=15, transport=self._transport) as client:
+                token = self._access_token(client)
+                response = client.post(self.SEND_URL, json={"raw": raw}, headers={"Authorization": f"Bearer {token}"})
+        except (httpx.ReadTimeout, httpx.WriteTimeout) as error:
+            raise SendAmbiguous(type(error).__name__) from error  # the request may have reached Gmail
+        except httpx.HTTPError as error:
+            raise SendFailed(type(error).__name__) from error
+        if response.status_code == 401:
+            GmailProvider._token = None  # the access token expired early: the retry fetches a new one
+            raise SendFailed("gmail 401", code="http_401")
+        if response.status_code >= 300:
+            raise SendFailed(f"gmail {response.status_code}", permanent=_rejected(response.status_code), code=f"http_{response.status_code}")
+        return str(response.json().get("id", ""))
+
+
 def get_provider() -> Provider | None:
     provider = get_settings().email_provider
     if provider == "mailpit":
@@ -204,4 +274,6 @@ def get_provider() -> Provider | None:
         return SmtpProvider()
     if provider == "brevo":
         return BrevoProvider()
+    if provider == "gmail":
+        return GmailProvider()
     return None
