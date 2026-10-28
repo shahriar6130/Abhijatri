@@ -3,7 +3,7 @@ from collections.abc import Generator
 from urllib.parse import urlparse
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings, get_settings
@@ -41,5 +41,7 @@ def postgres_session() -> Generator[Session, None, None]:
         yield session
         session.rollback()
     Base.metadata.drop_all(engine)
+    with engine.begin() as connection:  # drop_all leaves functions behind; the migration check needs a clean database
+        connection.execute(text("DROP FUNCTION IF EXISTS audit_events_are_append_only()"))
     engine.dispose()
 
