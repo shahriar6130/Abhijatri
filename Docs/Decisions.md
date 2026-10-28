@@ -2,6 +2,24 @@
 
 This log records build-time decisions without reopening the frozen Review specification.
 
+## 2026-10-28 (Notification system v1.1)
+
+Implements `Docs/Notification-Documentation.md` in full (owner request, 28 Oct 2026). Details: API.md 5.21, Schema.md, the spec's own section 15.
+
+| Decision | Rule | Reason |
+|---|---|---|
+| Reuse the shared outbox | `outbox_events` gains the spec 7.1 fields (`dedupe_key`, `aggregate_type`, `aggregate_version`, `recipient_policy`, `occurred_at`, `lease_owner`, `last_error_code`, statuses `processed`/`retry`/`dead_letter`) instead of a second `notification_outbox`. | Spec 7 says to reuse existing tables; the outbox already commits with every decision. |
+| Bilingual rows | A notification stores Bangla and English text side by side; templates are versioned per language. | The UI switches language without a refetch. |
+| Catalogue in code | Events, recipient resolvers, routes and allowed template variables live in `app/notify/registry.py`; the database can only tune priority, email and on/off (`notification_rules`) and add template versions. | Spec 3 and 7.7: a controlled registry, no executable rules from the database. |
+| Staff notices | Staff recipients are captured when the event happens and re-checked for their current role; staff items are hidden once the role is gone; the role-revoked notice itself is a member notice so it still arrives. | Spec 5. |
+| Email modes | Critical and high-priority notices are emailed at once and cannot be switched off; standard ones follow the person's preference (immediate, daily digest at their local time, default 08:00 Asia/Dhaka, or off). | Spec 2, 6.5, 7.8. |
+| Retries | About 1 min, 5 min, 30 min and 2 h with ±10 % jitter, then `failed_permanently`; a timeout or a worker lost mid-send is `ambiguous` and is only resent by a superadmin after checking. | Spec 8: no blind resends, no exactly-once claim. |
+| Addresses | Deliveries and suppressions keep an HMAC of the address (`crypto.EMAIL_DESTINATION_LABEL`), never the address; monitoring views show a prefix of it. | Spec 7.3, 7.9. |
+| Provider webhooks | Resend (Svix signature) and Brevo (bearer token), 5-minute replay window, stored once per provider event id; switched off (404) until a secret is configured. | Spec 9. |
+| Supabase access | No table is readable from the browser: RLS on everywhere and no grants to `anon`/`authenticated`; the API checks ownership. | Stricter than spec 10's "members read their own rows"; the browser talks only to the API (PF 8.1). |
+| Task assignment | Superadmins can assign a task (`POST /admin/tasks/{id}/assign`) so the "task assigned/unassigned/appeal assigned" notices have a workflow. | Spec 3 moderator events. |
+| Not emitted | `verification.expired` and `account.removal_requested` have no workflow in v1. | Spec 3 marks the second "only if this workflow exists". |
+
 ## 2026-10-27 (Member accounts on Supabase Auth, staff roles, moderation API)
 
 Implements Gantt R04 and R05 and the first phases of `Docs/Moderation-Dashboard-Specification.md`. Owner choices of 27 Oct 2026 are marked "owner".

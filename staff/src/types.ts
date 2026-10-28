@@ -77,6 +77,7 @@ export interface ReportSubject {
 
 export interface QueueItem {
   id: string;
+  assigned_to?: string | null;
   task_type: TaskType;
   subject_id: string;
   status: string;
@@ -95,6 +96,7 @@ export interface QueueItem {
 
 export interface Task {
   id: string;
+  assigned_to?: string | null;
   lease_token?: string | null;
   lease_expires_at: string | null;
   claimed_by: string | null;
@@ -214,4 +216,90 @@ export interface EnforcementCase {
 
 export interface EnforcementSubject extends EnforcementCase {
   kind: 'enforcement';
+}
+// ---- notifications (API.md 5.21) ----
+
+export interface InboxItem {
+  id: string;
+  kind: string;
+  category: string;
+  priority: 'critical' | 'high' | 'normal' | 'low';
+  critical: boolean;
+  audience: 'member' | 'staff';
+  title: { bn: string; en: string };
+  body: { bn: string; en: string };
+  link: string | null;
+  created_at: string;
+  read: boolean;
+  archived: boolean;
+}
+
+export interface DeliveryRow {
+  id: string;
+  notification_id: string | null;
+  digest_id: string | null;
+  kind: string | null;
+  channel: string;
+  status: string;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  provider: string | null;
+  destination_ref: string | null;
+  last_error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeliveryDetail extends DeliveryRow {
+  provider_message_id: string | null;
+  last_error_summary: string | null;
+  attempts: { attempt_number: number; outcome: string; started_at: string; finished_at: string | null; error_class: string | null; error_code: string | null; redacted_error_summary: string | null }[];
+}
+
+export interface OutboxRow {
+  id: string;
+  event_type: string;
+  aggregate_type: string | null;
+  aggregate_id: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: string;
+  last_error_code: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+export interface SuppressionRow {
+  id: string;
+  destination_ref: string;
+  channel: string;
+  reason_code: string;
+  created_by: string | null;
+  created_at: string;
+  removed_at: string | null;
+  removal_reason: string | null;
+}
+
+export interface TemplateKey {
+  template_key: string;
+  variables: string[];
+  audience: 'member' | 'staff' | null;
+  priority: string | null;
+  email: boolean | null;
+  enabled: boolean;
+  active_versions: Record<string, number>;
+}
+
+export interface TemplateVersion {
+  id: string;
+  template_key: string;
+  channel: 'in_app' | 'email';
+  locale: 'bn' | 'en';
+  version: number;
+  status: 'draft' | 'active' | 'retired';
+  subject_template: string | null;
+  title_template: string | null;
+  body_template: string;
+  created_at: string;
+  activated_at: string | null;
 }

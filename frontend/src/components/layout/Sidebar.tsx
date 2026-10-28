@@ -172,6 +172,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               <Link to="/account/appeals" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
                 {t('আপিল', 'Appeals')}
               </Link>
+              <Link to="/account/notifications" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('বিজ্ঞপ্তি ও ইমেইল', 'Notifications and email')}
+              </Link>
             </div>
           )}
           {/* A member or a named guest can sign out; an anonymous guest has nothing to sign out of. */}

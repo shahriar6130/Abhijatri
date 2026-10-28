@@ -680,11 +680,7 @@ Member routes need a session (writes: CSRF). Staff routes follow 5.18 (404 for n
 | `POST /appeals` | member with standing | `{ target_type: moderation_action\|enforcement_case\|verification_case, target_id, reason }` -> `201`. Deadline: end of the 30th day after the decision, Asia/Dhaka (`409 APPEAL_WINDOW_CLOSED`); one appeal per decision (`409 DUPLICATE_APPEAL`, also after a decision; a withdrawn appeal may be filed again) |
 | `POST /appeals/{appeal_id}/withdraw` | appellant | While `received` or `in_review` |
 | `POST /admin/appeals/{appeal_id}/decision` | staff holding the task, not the original decider | `{ outcome: upheld\|overturned, expected_version, note, task_id, lease_token }`; `403 APPEAL_REVIEWER_NOT_INDEPENDENT`. Overturning restores a hidden review, sends a rejected review back to the queue, grants a rejected verification, or reverses an enforcement and its sanctions. The original decision is kept |
-| `GET /notifications?limit=&before=` | member | `{ items: [{ id, kind, critical, title {bn,en}, body {bn,en}, link, created_at, read }], unread }` |
-| `POST /notifications/{notification_id}/read`, `POST /notifications/read-all` | member | `{ unread }` |
-| `GET /notifications/stream` | member | Server-Sent Events: `unread` on connect, then one `notification` event per new item (within about 4 seconds of the decision). Lasts 5 minutes; `EventSource` reconnects |
-
-Delivery: the in-process worker relays `outbox_events` (claim with `FOR UPDATE SKIP LOCKED`, 2-minute lease, backoff, 6 tries) into `notifications`. Critical notices (account decisions) are emailed at once to the current verified address; the rest go into a daily digest at 08:00 Asia/Dhaka. `EMAIL_PROVIDER` is `mailpit` (local inbox), `resend` (production, with an idempotency key) or `none`. A send that may have been accepted before a crash is recorded `ambiguous` and is not resent automatically.
+| Notifications | member | Moved to section 5.21 (Notification system v1.1). |
 
 ### 5.20 Member reviews with photos and videos (implemented 27 October 2026)
 
@@ -697,8 +693,56 @@ Owner decisions, 27 Oct 2026: any signed-in member (confirmed email) may attach 
 | `POST /reviews/{review_id}/media/{media_id}/complete` | the author | The server reads the object: images must really be JPEG, PNG or WebP of at most 20 megapixels and are re-encoded to WebP (long edge <= 2048 px) with no EXIF/GPS; videos must be MP4 with H.264 video, AAC audio and at most 60 s, and their metadata boxes and extra tracks are blanked in place (no transcoding). `200 { id, kind, state: "pending", content_type, width, height, duration_ms, size_bytes }`. A bad file is deleted and answers `422` with field `file` and code `BROKEN`, `TYPE`, `TOO_MANY_PIXELS`, `TOO_LARGE`, `TOO_LONG`, `VIDEO_CODEC` or `NOT_UPLOADED` |
 | `POST /reviews/{review_id}/media/{media_id}/remove` | the author, while `PENDING` | `204`; deletes the objects and frees the place |
 | `POST /admin/submissions/{review_id}/media/{media_id}/url` | staff | `{ url, expires_in: 300 }` for the checked copy, to look before deciding |
+| `GET /admin/media?state=pending\|approved\|rejected&limit=` | staff | Recent media with `review_id`, `review_status`, `destination_id`, `decided_at` |
+| `POST /admin/media/{media_id}/decision` | staff | `{ decision: approve\|reject, reason_code }`: corrects a decision made with the review (`422 TRANSITION_NOT_ALLOWED` for pending or removed media). Audited as `media.approve` / `media.reject` with `from` and `to` |
 
 Moderation: the queue item of a review lists its pending media (`subject.media`). `POST /admin/submissions/{review_id}/moderation-actions` accepts `rejected_media_ids` (PUBLISH only): those are rejected and the rest approved; REJECT rejects all. The decision, the media states and the audit record (`metadata.media`) commit together. The public feed (5.8) adds `author_display_name` for member reviews and `media: [{ id, kind, content_type, url, alt_text, caption, width, height, duration_ms }]` with approved media only; `url` is a signed link valid for one hour. Uploads not completed within 24 hours are purged by the retention job.
+
+### 5.21 Notification system v1.1 (implemented 28 October 2026)
+
+Implements `Docs/Notification-Documentation.md`. Member routes need a session (writes: CSRF). Superadmin routes follow 5.18 (404 for non-staff, 403 for moderators, TOTP) and every write is audited. Responses never contain an email address, subject or message body of an email; deliveries show only a prefix of the address HMAC.
+
+**Member inbox**
+
+| Route | Body and result |
+|---|---|
+| `GET /notifications?limit=1..50&cursor=&archived=false&unread_only=false` | `{ items: [{ id, kind, category, priority, critical, audience, title {bn,en}, body {bn,en}, link, created_at, read, archived }], next_cursor, unread }`, newest first. `422 INVALID_CURSOR`. Staff notices (`audience: staff`) appear only while the person holds a staff role. |
+| `GET /notifications/unread-count` | `{ unread }` (archived items are not counted) |
+| `PATCH /notifications/{notification_id}` | `{ read?: bool, archived?: bool }` on your own item only (`404` otherwise; any other field `422`) → the item plus `unread` |
+| `POST /notifications/mark-all-read` | `{ unread: 0 }` |
+| `GET /notification-preferences` | `{ standard_email_mode: immediate\|digest\|off, digest_timezone, digest_local_time: "HH:MM", always_immediate: ["critical","high"] }`; default `digest`, `Asia/Dhaka`, `08:00` |
+| `PUT /notification-preferences` | Same three fields; the zone must be an IANA name. Critical and high-priority notices are always emailed at once and cannot be switched off. |
+| `GET /notifications/stream` | Server-Sent Events: `unread` on connect, then `notification` events. Best effort only: the inbox above is the source of truth, and the page refetches after a reconnect. |
+
+**Superadmin monitoring and templates**
+
+| Route | Body and result |
+|---|---|
+| `GET /admin/notification-deliveries?status=&limit=` | `{ items: [{ id, notification_id, digest_id, kind, channel, status, attempt_count, next_attempt_at, provider, destination_ref, last_error_code, created_at, updated_at }], counts }` |
+| `GET /admin/notification-deliveries/{delivery_id}` | The delivery plus `provider_message_id`, `last_error_summary` (redacted) and `attempts: [{ attempt_number, outcome, started_at, finished_at, error_class, error_code, redacted_error_summary }]` |
+| `POST /admin/notification-deliveries/{delivery_id}/retry` | `{ reason }`; only `ambiguous` or `failed_permanently` (`422 TRANSITION_NOT_ALLOWED` otherwise). Audited `notification.delivery_retried`. |
+| `GET /admin/notification-outbox?status=pending\|processing\|processed\|retry\|dead_letter&limit=` | `{ items: [{ id, event_type, aggregate_type, aggregate_id, status, attempts, next_attempt_at, last_error_code, created_at, processed_at }], counts, oldest_unprocessed_at }` |
+| `GET /admin/notification-suppressions?active=true` | Suppressions with an HMAC prefix, never the address |
+| `POST /admin/notification-suppressions` | `{ email, channel: "email", reason_code }` → `201`; `422 ALREADY_SUPPRESSED` field code. Audited. |
+| `DELETE /admin/notification-suppressions/{suppression_id}` | `{ removal_reason }` → the removed row. Audited. |
+| `GET /admin/notification-templates` | Every template key with its allowed variables, audience, live priority/email/enabled and active versions |
+| `GET /admin/notification-templates/{template_key}/versions` | All versions of every channel and language |
+| `POST /admin/notification-templates/{template_key}/versions` | `{ channel: in_app\|email, locale: bn\|en, subject_template?, title_template?, body_template }` → `201` draft with the next version number. Only the key's allowed `{variables}` (`UNKNOWN_VARIABLE`, `BAD_PLACEHOLDER`). Audited. |
+| `POST /admin/notification-templates/{template_key}/versions/{version}/activate` | `{ channel, locale }`: the version becomes active and the previous active one is retired (one active per key/channel/locale; a retired version cannot come back, `422`). Audited. |
+| `PATCH /admin/notification-rules/{template_key}` | `{ priority?, email?, enabled? }` for an existing catalogue rule only (`404` otherwise). Audited. |
+| `POST /admin/tasks/{task_id}/assign` | Superadmin: `{ user_id: uuid \| null }`. Notifies the assignee (task or appeal assigned) and the previous assignee (unassigned). Audited. |
+
+**Provider webhook (no session; provider authentication instead)**
+
+`POST /webhooks/notifications/{provider}` (`resend` or `brevo`): Resend uses the Svix signature (`svix-id`, `svix-timestamp`, `svix-signature`, secret `RESEND_WEBHOOK_SECRET`); Brevo sends `Authorization: Bearer <BREVO_WEBHOOK_TOKEN>`. A timestamp outside 5 minutes, a wrong signature or a non-JSON body is refused (`403`/`422`) and counted for the anomaly alert; a provider without a configured secret is `404`. Each `(provider, provider_event_id)` is processed once (`{ status: "processed" | "duplicate" }`). Delivered marks the delivery `delivered`; a hard bounce marks it `bounced` and suppresses the address; a complaint suppresses it.
+
+**Behaviour**
+
+- Producers write `outbox_events` in the business transaction (`app/notify/events.py`, unique `dedupe_key`, captured staff recipients and the recipient policy). The worker claims with `FOR UPDATE SKIP LOCKED` and a lease, creates one notification per event, recipient and kind, and retries a failing event with backoff until `dead_letter` (6 tries).
+- The catalogue (`app/notify/registry.py`) maps events to the kinds of spec section 3. Staff captured at event time are re-checked against their current role; the person whose role is revoked is still told (as a member notice).
+- Email: critical and high-priority items at once, others by preference (immediate, daily digest at the person's local time, or off). The current verified address is read at send time; unverified or suppressed addresses are `skipped`. Retries after about 1 min, 5 min, 30 min and 2 h with jitter, then `failed_permanently`; a timeout is `ambiguous` and never resent automatically; a worker that dies mid-send leaves `ambiguous` (lease reconciliation). Every try has an attempt row.
+- Alerts (deduplicated per window, also logged at ERROR): lease expiring (holder), queue overdue (moderators, daily), escalation, repeated denials, delivery failures (5/hour), outbox backlog (older than 10 minutes), webhook anomalies (5/hour).
+- Retention: per-row `expires_at` (90 days, critical 24 months); items linked to an open appeal are kept until it closes; processed outbox rows go after 30 days unless still referenced.
 
 ## 6. Changes required in the current code
 

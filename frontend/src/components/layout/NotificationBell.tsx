@@ -1,15 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell } from 'lucide-react';
+import { Bell, WifiOff } from 'lucide-react';
 import { getNotifications, markAllRead, markRead, subscribeToNotifications } from '../../api/account';
 import { useLanguage } from '../../context/LanguageContext';
 import { useSession } from '../../context/SessionContext';
 import type { AppNotification } from '../../types';
 import { formatTimestamp } from '../../utils/format';
+import { linkTarget, mergeNewest } from '../../utils/notifications';
+
+export const STAFF_BASE_URL: string = (import.meta.env.VITE_STAFF_BASE_URL || 'http://localhost:5175').replace(/\/+$/, '');
 
 /**
- * In-app notifications for signed-in members (Moderation spec 11). New items arrive live over
- * Server-Sent Events; a decision made by staff shows here within a few seconds.
+ * The bell with the latest notifications (Notification spec 12). New items arrive live over
+ * Server-Sent Events; that is only a hint, so after a dropped connection the inbox is refetched.
+ * The full inbox, archive and email preferences live at /account/notifications.
  */
 export const NotificationBell: React.FC = () => {
   const { t, language } = useLanguage();
@@ -17,25 +21,38 @@ export const NotificationBell: React.FC = () => {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
+  const [offline, setOffline] = useState(false);
   const [flash, setFlash] = useState<AppNotification | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const member = session.kind === 'member';
 
-  useEffect(() => {
-    if (!member) return undefined;
-    getNotifications()
+  const load = useCallback(() => {
+    getNotifications({ limit: 10 })
       .then((answer) => {
         setItems(answer.items);
         setUnread(answer.unread);
       })
       .catch(() => undefined);
-    return subscribeToNotifications(setUnread, (item, count) => {
-      setItems((current) => [item, ...current.filter((existing) => existing.id !== item.id)].slice(0, 20));
-      setUnread(count);
-      setFlash(item);
-      if (item.kind.startsWith('verification.')) void refresh(); // the Verified Member badge may have changed
+  }, []);
+
+  useEffect(() => {
+    if (!member) return undefined;
+    load();
+    return subscribeToNotifications({
+      onUnread: setUnread,
+      onNotification: (item, count) => {
+        setItems((current) => mergeNewest(current, [item], 10));
+        setUnread(count);
+        setFlash(item);
+        if (item.kind.startsWith('verification.') || item.kind.startsWith('staff.role')) void refresh(); // badge or role may have changed
+      },
+      onDisconnect: () => setOffline(true),
+      onReconnect: () => {
+        setOffline(false);
+        load(); // events sent while the connection was down are not replayed
+      },
     });
-  }, [member, refresh]);
+  }, [member, refresh, load]);
 
   useEffect(() => {
     if (!flash) return undefined;
@@ -62,6 +79,7 @@ export const NotificationBell: React.FC = () => {
   }, []);
 
   if (!member) return null;
+  const lang = language === 'bn' ? 'bn' : 'en';
 
   return (
     <div className="relative" ref={panel}>
@@ -81,14 +99,14 @@ export const NotificationBell: React.FC = () => {
       </button>
 
       {flash && !open && (
-        <div role="status" className="absolute right-0 top-12 w-72 p-3 rounded-xl shadow-lg bg-white dark:bg-dark-surface-1 border border-surface-muted/40 dark:border-dark-surface-2 text-xs">
-          <p className="font-bold text-on-surface dark:text-on-dark">{flash.title[language === 'bn' ? 'bn' : 'en']}</p>
-          <p className="text-on-surface-variant dark:text-on-dark-muted">{flash.body[language === 'bn' ? 'bn' : 'en']}</p>
+        <div role="status" className="absolute right-0 top-12 w-72 p-3 rounded-xl shadow-lg bg-white dark:bg-dark-surface-1 border border-surface-muted/40 dark:border-dark-surface-2 text-xs z-40">
+          <p className="font-bold text-on-surface dark:text-on-dark">{flash.title[lang]}</p>
+          <p className="text-on-surface-variant dark:text-on-dark-muted">{flash.body[lang]}</p>
         </div>
       )}
 
       {open && (
-        <div className="absolute right-0 top-12 w-80 max-h-[70vh] overflow-auto rounded-xl shadow-lg bg-white dark:bg-dark-surface-1 border border-surface-muted/40 dark:border-dark-surface-2 z-40">
+        <div className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-auto rounded-xl shadow-lg bg-white dark:bg-dark-surface-1 border border-surface-muted/40 dark:border-dark-surface-2 z-40">
           <div className="flex items-center justify-between px-4 py-3 border-b border-surface-muted/30 dark:border-dark-surface-2">
             <span className="text-sm font-bold font-title text-on-surface dark:text-on-dark">{t('বিজ্ঞপ্তি', 'Notifications')}</span>
             {unread > 0 && (
@@ -101,10 +119,15 @@ export const NotificationBell: React.FC = () => {
               </button>
             )}
           </div>
+          {offline && (
+            <p role="status" className="flex items-center gap-2 px-4 py-2 text-[11px] bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <WifiOff size={12} aria-hidden="true" />
+              {t('লাইভ সংযোগ নেই; আবার সংযোগের চেষ্টা চলছে। তালিকা পুরোনো হতে পারে।', 'Live updates paused; reconnecting. The list may be out of date.')}
+            </p>
+          )}
           {items.length === 0 && <p className="px-4 py-6 text-xs text-on-surface-variant dark:text-on-dark-muted">{t('এখনো কোনো বিজ্ঞপ্তি নেই।', 'No notifications yet.')}</p>}
           <ul>
             {items.map((item) => {
-              const lang = language === 'bn' ? 'bn' : 'en';
               const content = (
                 <>
                   <span className="flex items-center gap-2">
@@ -115,14 +138,20 @@ export const NotificationBell: React.FC = () => {
                   <span className="block text-[10px] text-on-surface-variant/70 dark:text-on-dark-muted mt-1">{formatTimestamp(item.created_at, language)}</span>
                 </>
               );
+              const target = linkTarget(item.link, STAFF_BASE_URL);
+              const itemClass = 'block w-full text-left px-4 py-3 text-xs hover:bg-surface-sage/40 dark:hover:bg-dark-surface-2';
               return (
                 <li key={item.id} className="border-b border-surface-muted/20 dark:border-dark-surface-2 last:border-0">
-                  {item.link ? (
-                    <Link to={item.link} onClick={() => { void read(item); setOpen(false); }} className="block px-4 py-3 text-xs hover:bg-surface-sage/40 dark:hover:bg-dark-surface-2">
+                  {target && 'internal' in target ? (
+                    <Link to={target.internal} onClick={() => { void read(item); setOpen(false); }} className={itemClass}>
                       {content}
                     </Link>
+                  ) : target ? (
+                    <a href={target.external} target="_blank" rel="noopener noreferrer" onClick={() => void read(item)} className={itemClass}>
+                      {content}
+                    </a>
                   ) : (
-                    <button type="button" onClick={() => void read(item)} className="block w-full text-left px-4 py-3 text-xs hover:bg-surface-sage/40 dark:hover:bg-dark-surface-2">
+                    <button type="button" onClick={() => void read(item)} className={itemClass}>
                       {content}
                     </button>
                   )}
@@ -130,6 +159,13 @@ export const NotificationBell: React.FC = () => {
               );
             })}
           </ul>
+          <Link
+            to="/account/notifications"
+            onClick={() => setOpen(false)}
+            className="block px-4 py-3 text-xs font-bold text-center text-forest-primary dark:text-neon-lime border-t border-surface-muted/30 dark:border-dark-surface-2"
+          >
+            {t('সব বিজ্ঞপ্তি ও ইমেইল সেটিংস', 'All notifications and email settings')}
+          </Link>
         </div>
       )}
     </div>

@@ -123,7 +123,22 @@ export function SignIn({ lang, session, onSession }: Props) {
             )}
 
             {signedIn.mfa_factors.length > 0 && (
-              <CodeForm lang={lang} code={code} setCode={setCode} busy={busy} onSubmit={submitCode(signedIn.mfa_factors[0].id)} />
+              <>
+                <p className="small">
+                  {t(
+                    'এই অ্যাকাউন্টে আগেই একটি অথেনটিকেটর সেট করা আছে, তাই QR কোড আর দেখানো হয় না। ফোনের অথেনটিকেটর অ্যাপে "Abhijatri" খুলে ৬ সংখ্যার কোড দিন।',
+                    'An authenticator is already set up for this account, so the QR code is not shown again. Open the "Abhijatri" entry in your authenticator app and enter its 6-digit code.',
+                  )}
+                </p>
+                <CodeForm lang={lang} code={code} setCode={setCode} busy={busy} onSubmit={submitCode(signedIn.mfa_factors[0].id)} />
+                <p className="small muted">
+                  {t(
+                    'ফোন বা অ্যাপ হারিয়েছেন? প্ল্যাটফর্মের মালিককে বলুন সার্ভারে রিসেট কমান্ড চালাতে; তারপর পরের সাইন-ইনে নতুন QR কোড আসবে।',
+                    'Lost the phone or the app? Ask the platform owner to run the reset command on the server; the next sign-in then shows a new QR code.',
+                  )}{' '}
+                  <code>python -m app.jobs.reset_mfa --email {signedIn.user.email}</code>
+                </p>
+              </>
             )}
 
             <button type="button" className="ghost" onClick={leave}>
