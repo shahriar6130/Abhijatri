@@ -307,7 +307,10 @@ def password_reset_confirm(
         tokens: TokenPair = _provider(gotrue.verify_token_hash, payload.token_hash, "recovery")
         _provider(gotrue.update_password, tokens.access_token, payload.new_password)
     except GoTrueError as error:
-        if error.code in {"weak_password", "same_password"}:
+        if error.code == "same_password":
+            # The link is spent by now (verify succeeded), so the page also offers a new one.
+            raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "password", "code": "SAME_PASSWORD"}]) from error
+        if error.code == "weak_password":
             raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "password", "code": "WEAK"}]) from error
         raise ApiError("TOKEN_INVALID_OR_EXPIRED") from error
     try:  # every session of the account ends, including the one this link created

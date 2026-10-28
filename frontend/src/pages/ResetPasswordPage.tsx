@@ -35,6 +35,19 @@ export const ResetPasswordPage: React.FC = () => {
       await confirmPasswordReset(tokenHash, password);
       setDone(true);
     } catch (error) {
+      const same = error instanceof ApiError && error.fieldErrors.some((f) => f.field === 'password' && f.code === 'SAME_PASSWORD');
+      if (same) {
+        // Supabase spends the link before it compares passwords, so a new link is needed for the next try.
+        setErrors({ password: problemMessage('password', 'SAME_PASSWORD', t) });
+        setLinkDead(true);
+        setFormError(
+          t(
+            'নতুন পাসওয়ার্ড বর্তমানটির মতোই ছিল। এই লিংকটি ব্যবহার হয়ে গেছে: নতুন লিংক চেয়ে অন্য একটি পাসওয়ার্ড দিন।',
+            'The new password was the same as your current one. This link has now been used: ask for a new link and choose a different password.',
+          ),
+        );
+        return;
+      }
       if (error instanceof ApiError && error.code === 'TOKEN_INVALID_OR_EXPIRED') setLinkDead(true);
       setFormError(accountErrorMessage(error, t));
     } finally {

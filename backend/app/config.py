@@ -117,8 +117,13 @@ class Settings(BaseSettings):
     token_confirms_per_network_per_hour: int = Field(default=30, ge=1)
 
     # Notifications (Moderation spec 11). `mailpit` is the local inbox, `resend` production, `none` off.
-    email_provider: str = Field(default="none", pattern="^(none|mailpit|resend|smtp|brevo)$")
+    email_provider: str = Field(default="none", pattern="^(none|mailpit|resend|smtp|brevo|gmail)$")
     brevo_api_key: str | None = Field(default=None, repr=False)
+    # Gmail API over HTTPS (EMAIL_PROVIDER=gmail): works where outbound SMTP is blocked (Railway below Pro).
+    # Get the refresh token once with `python -m app.jobs.gmail_authorize`.
+    gmail_client_id: str | None = None
+    gmail_client_secret: str | None = Field(default=None, repr=False)
+    gmail_refresh_token: str | None = Field(default=None, repr=False)
     # Who sends the verification and password-reset emails:
     # - "supabase": Supabase Auth mails them itself (its own rate limits apply);
     # - "app": the API asks Auth for the one-time token without any email, then sends it through
@@ -273,6 +278,8 @@ class Settings(BaseSettings):
             raise ValueError("EMAIL_PROVIDER=mailpit is a development inbox; use resend in production")
         if self.email_provider == "smtp" and not (self.smtp_host and self.smtp_username and self.smtp_password):
             raise ValueError("SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD are required when EMAIL_PROVIDER=smtp")
+        if self.email_provider == "gmail" and not (self.gmail_client_id and self.gmail_client_secret and self.gmail_refresh_token):
+            raise ValueError("GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN are required when EMAIL_PROVIDER=gmail")
         if self.email_provider == "brevo" and not self.brevo_api_key:
             raise ValueError("BREVO_API_KEY is required when EMAIL_PROVIDER=brevo")
         if self.auth_skip_email_verification:

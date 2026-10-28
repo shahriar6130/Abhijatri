@@ -19,6 +19,7 @@ Implements `Docs/Notification-Documentation.md` in full (owner request, 28 Oct 2
 | Supabase access | No table is readable from the browser: RLS on everywhere and no grants to `anon`/`authenticated`; the API checks ownership. | Stricter than spec 10's "members read their own rows"; the browser talks only to the API (PF 8.1). |
 | Task assignment | Superadmins can assign a task (`POST /admin/tasks/{id}/assign`) so the "task assigned/unassigned/appeal assigned" notices have a workflow. | Spec 3 moderator events. |
 | Not emitted | `verification.expired` and `account.removal_requested` have no workflow in v1. | Spec 3 marks the second "only if this workflow exists". |
+| Gmail API provider (owner) | `EMAIL_PROVIDER=gmail` sends through the Gmail API over HTTPS with an OAuth refresh token (scope `gmail.send` only), from the authorising Gmail address; about 500 recipients a day. One-time token: `python -m app.jobs.gmail_authorize`. | Railway blocks outbound SMTP below the Pro plan and the Brevo account is under review (28 Oct 2026). |
 
 ## 2026-10-27 (Member accounts on Supabase Auth, staff roles, moderation API)
 
