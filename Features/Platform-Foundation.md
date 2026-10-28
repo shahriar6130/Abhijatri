@@ -1303,6 +1303,7 @@ Before real personal data is accepted, the processor and cross-border register (
 | Google Drive | Weekly backups |
 | Resend | Email |
 | Cloudflare | Turnstile |
+| Upstash | Redis: aggregate visit and request counters only, ap-southeast-1 (added 22 Oct 2026) |
 | Domain registrar and DNS provider | Domain and DNS |
 
 ## 24. Free-Tier Readiness
@@ -1550,7 +1551,7 @@ An enhancement may be accepted only when it:
 
 The following remain outside the Platform Foundation:
 
-- Redis
+- Redis, except the Upstash visit and ops event counters (`Docs/Decisions.md`, 22 Oct 2026); rate limiting and caching stay on PostgreSQL and in-process memory
 - content-delivery network integration and any proxy in front of Render
 - automatic media transcoding
 - microservices

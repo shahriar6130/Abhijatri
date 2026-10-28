@@ -200,8 +200,12 @@ def test_api_returns_category_ratings_and_averages(postgres_session) -> None:
     application.dependency_overrides[get_session] = lambda: postgres_session
     client = TestClient(application)
 
-    feed = client.get(f"/api/v1/destinations/{destination.id}/reviews").json()
+    response = client.get(f"/api/v1/destinations/{destination.id}/reviews")
+    feed = response.json()
     assert sorted(len(item["category_ratings"]) for item in feed["items"]) == [0, 1, 3]
+    # A guest's typed name is never public: only "Anonymous guest · tag" (owner, 22 Oct 2026).
+    assert all(item["author_type"] == "GUEST" and "guest_display_name" not in item for item in feed["items"])
+    assert "সাদিয়া রহমান" not in response.text
     averages = {row["category"]: row for row in feed["guest_category_averages"]}
     assert averages["FOOD"] == {"category": "FOOD", "average": 3.0, "count": 2}
     assert averages["CLEANLINESS"]["count"] == 1

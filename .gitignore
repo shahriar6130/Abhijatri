@@ -21,3 +21,9 @@ dist-ssr/
 *.local
 frontend/codes/extracted/
 *.tsbuildinfo
+
+# Audit and pen-test reports can quote live credentials (Security audit F-01, 22 Oct 2026).
+# Keep them outside the repository; a redacted summary lives in Docs/Security-Audit-*.md.
+*Audit*Report*.pdf
+*audit*report*.pdf
+*.report.pdf

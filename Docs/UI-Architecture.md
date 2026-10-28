@@ -29,7 +29,8 @@ The rules every screen follows. Section 8 lists where the current build does not
 | English | Bangla | Rule |
 |---|---|---|
 | Guest | অতিথি | Never called a member |
-| Guest #N | অতিথি #N (Bangla digits) | Count of this browser's first visit, not an identity (API 5.14) |
+| Guest tag | অতিথি `1C669-J0TDY` (Latin letters in both languages) | This browser's public pseudonym, derived on the device from the guest scope secret (Guest-Identity-and-Visits 3.1). Replaced "Guest #N" on 22 Oct 2026. |
+| Anonymous guest | বেনামী অতিথি | Second line on a guest review card: "Anonymous guest · 1C669-J0TDY". "Anonymous" means "no account". |
 | Member | সদস্য | Signed-in account (R04) |
 | Verified Member | যাচাইকৃত সদস্য | Never presented as the same claim as a Verified Visit (Review.md 3.3); Verified Visit is not in the MVP and gets its own term when specified |
 | Community Rating | কমিউনিটি রেটিং | Verified Member reviews only, shown from five reviews |
@@ -44,7 +45,7 @@ The rules every screen follows. Section 8 lists where the current build does not
 ```text
 Public shell (PublicLayout: brand, language and theme switches, footer with 999)
 ├── /                 Landing: Continue as guest | Sign in; quick links to destinations
-├── /guest            Guest entry: name kept on this device, welcome with Guest #N, review guide
+├── /guest            Guest entry: name kept on this device, welcome with the guest tag, 30-day name session, "Start as a new guest", review guide
 └── /login            Sign in (disabled until R04)
 
 App shell (AppLayout: sidebar, top bar, session card)
@@ -74,7 +75,7 @@ Planned public routes, added when their backend or text exists:
 
 | Place | Contents | Bilingual notes |
 |---|---|---|
-| Sidebar (desktop fixed, mobile drawer) | Overview, Destinations, Cost planner, Offline packs, Saved trips, Reviews, System status; brand links to `/`; session card (guest name and Guest #N, Sign in, Sign out) | Labels in the title font; both language forms name the same thing |
+| Sidebar (desktop fixed, mobile drawer) | Overview, Destinations, Cost planner, Offline packs, Saved trips, Reviews, System status; brand links to `/`; session card (guest name and guest tag, Sign in, Sign out) | Labels in the title font; both language forms name the same thing |
 | Top bar | Destination search (planned, hidden until it works), API status pill, language switch, theme switch | The language button shows the *target* language ("English" / "বাংলা") and carries that `lang`; its accessible name is that visible word |
 | Public top bar | Brand, language switch, theme switch | Same switch component (`PreferenceToggles`) |
 
@@ -107,7 +108,7 @@ Each component owns its bilingual behaviour; pages compose them. Status: **Built
 |---|---|---|---|---|
 | Context | `LanguageContext` | Current language, `t(bn, en)`, persistence, `<html lang>` | L1, L2 (storage not yet wrapped, U12) | Partial |
 | Context | `ThemeContext` | Light and dark themes | Same storage rule as L2 (U12) | Partial |
-| Context | `SessionContext` | Guest with local name and Guest #N; Member and Verified Member from R04 | Session labels per section 1.1 | Partial |
+| Context | `SessionContext` | Guest with local name (30-day session) and guest tag; Member and Verified Member from R04 | Session labels per section 1.1 | Partial |
 | Layout | `PublicLayout` | Shell for `/`, `/guest`, `/login` | Footer emergency line paired; legal links when the pages exist | Built |
 | Layout | `AppLayout`, `Sidebar`, `Navbar` | App shell and navigation | English-only and mismatched labels remain (U4, U5, U9, U10) | Partial |
 | Layout | `PreferenceToggles` | Language and theme switches | Target-language label with its own `lang`; accessible name fix (U11) | Partial |

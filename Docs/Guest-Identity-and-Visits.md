@@ -1,6 +1,6 @@
 # Guest Identity and Visit Counting
 
-**Status:** Proposed, 21 October 2026. Replaces the pasted "Production-Grade System Architecture" draft; the issues with that draft are in `Docs/Reviews/Guest-Identity-Monitoring-review.md`.
+**Status:** Implemented 22 October 2026 (sections 3, 4.2, 4.4 to 4.6, 5; member visits wait for R04). Proposed 21 October 2026. Replaces the pasted "Production-Grade System Architecture" draft; the issues with that draft are in `Docs/Reviews/Guest-Identity-Monitoring-review.md`.
 **Companion:** `Docs/System-Monitoring-Dashboard.md` (the private dashboard that reads these numbers). Section 9 describes how the two connect.
 **Owner decisions it carries forward:** guest footprint is a count only (Decisions.md, 20 Oct 2026); guests have no account (Review.md 1.1); the team chat of 21 Oct 2026 (random unique guest string, badge on the device, "anonymous guest" heading on notes, Guest / Verified / New / Total / Old = A − B, Upstash Redis instead of the database for guests, Vercel hosting).
 
@@ -57,6 +57,7 @@ display   = XXXXX-XXXXX        alphabet 0123456789ABCDEFGHJKMNPQRSTVWXYZ
 |---|---|---|
 | `abhijatri_guest_scope` | Guest scope secret | Existing; now created on first visit |
 | `abhijatri_guest_name` | Name typed on `/guest` | Existing |
+| `abhijatri_guest_name_seen_on` | Dhaka date the name was last seen; the name is forgotten after 30 days without a visit | Existing |
 | `abhijatri_first_visit_on` | Dhaka date of this browser's first visit | New |
 | `abhijatri_last_visit_on` | Dhaka date of the last counted visit | New; replaces `abhijatri_guest_last_visit` (read once, then removed) |
 | `abhijatri_guest_number` | Old "Guest #N" | Retired; read once only to mark the browser as returning |
@@ -67,17 +68,18 @@ The tag itself is not stored, because it is derived. All reads and writes are gu
 
 | Place | Shows |
 |---|---|
-| Sidebar session card, `/guest` welcome | "Welcome, Sadia · Guest `1C669-J0TDY`" (Bangla: "স্বাগতম, Sadia · অতিথি `1C669-J0TDY`"). Without a name: "Guest `1C669-J0TDY`". |
-| Guest review card on a destination | Line 1: the display name the guest typed. Line 2: **"Anonymous guest · `1C669-J0TDY`"** (বেনামী অতিথি). Reviews written before the tag existed show "Anonymous guest" only. |
+| Sidebar session card | "Welcome, Sadia · Guest `1C669-J0TDY`" (Bangla: "স্বাগতম, Sadia · অতিথি `1C669-J0TDY`"). Without a name: "Guest `1C669-J0TDY`". |
+| `/guest` page | A badge "You are Guest `1C669-J0TDY`" (Bangla: "আপনি অতিথি `1C669-J0TDY`") beside the welcome heading. |
+| Guest review card on a destination | **"Anonymous guest · `1C669-J0TDY`"** (বেনামী অতিথি) only. The typed name is **not** shown and not sent by the public API (owner, 22 Oct 2026); only moderators see it. Reviews written before the tag existed show "Anonymous guest" only. |
 | Member review card | Name and Member / Verified Member badge, unchanged. |
 
 The tag stays in Latin letters in both languages, like the receipt, because it is an identifier. "Anonymous" here means "no account", and the submission notice says so: *"Your reviews from this browser show the same guest tag, so readers can see they came from the same guest."* (Security 3.4 notice change.)
 
-**Reset.** `/guest` offers "Start as a new guest". It makes a new scope secret, and therefore a new tag, only when no unsent draft is waiting. It does not reset the visit dates, so it does not inflate "new guests".
+**Reset.** `/guest` offers "Start as a new guest". It makes a new scope secret, and therefore a new tag, only when no unsent draft is waiting. It does not reset the visit dates, so it does not inflate "new guests". Until drafts are stored on the device (R15), a draft lives only in the review form's state, and the form and `/guest` are separate pages, so no unsent draft can exist while the button is shown. The "no unsent draft" check is added with R15.
 
 ### 3.4 Sign-in, sign-out and loss
 
-- **Guest sign-out** forgets the name only (Decisions 20 Oct). The tag, the visit dates and the secret stay. This fixes the developer's complaint that everything vanished on sign-out.
+- **Guest sign-out** forgets the name only (Decisions 20 Oct). The name is also forgotten after 30 days without a visit (`abhijatri_guest_name_seen_on`). The tag, the visit dates and the secret stay. This fixes the developer's complaint that everything vanished on sign-out.
 - **Member sign-in (R04)** sends nothing about the guest to the account. Guest reviews stay receipt-owned guest reviews. On member sign-out the browser is the same guest again with the same tag.
 - **Lost when:** storage is cleared, a new browser or device is used, or a private window is opened. By design there is no server-side recovery, because nothing is stored. A visitor who wants persistence creates an account.
 

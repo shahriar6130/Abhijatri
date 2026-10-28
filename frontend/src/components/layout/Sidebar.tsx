@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useSession } from '../../context/SessionContext';
-import { formatNumber } from '../../utils/format';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -23,7 +22,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { language, t } = useLanguage();
+  const { t } = useLanguage();
   const { session, isVerifiedMember, signOut } = useSession();
   const navigate = useNavigate();
 
@@ -147,10 +146,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 ? `${session.displayName}${isVerifiedMember ? t(' · যাচাইকৃত সদস্য', ' · Verified Member') : ''}`
                 : session.displayName
                   ? t(
-                      `স্বাগতম, ${session.displayName}${session.guestNumber ? ` · অতিথি #${formatNumber(session.guestNumber, language)}` : ''}`,
-                      `Welcome, ${session.displayName}${session.guestNumber ? ` · Guest #${session.guestNumber}` : ''}`,
+                      `স্বাগতম, ${session.displayName}${session.guestTag ? ` · অতিথি ${session.guestTag}` : ''}`,
+                      `Welcome, ${session.displayName}${session.guestTag ? ` · Guest ${session.guestTag}` : ''}`,
                     )
-                  : t('অতিথি হিসেবে দেখছেন', 'Browsing as a guest')}
+                  : session.guestTag
+                    ? t(`অতিথি ${session.guestTag}`, `Guest ${session.guestTag}`)
+                    : t('অতিথি হিসেবে দেখছেন', 'Browsing as a guest')}
             </span>
           </div>
           {session.kind === 'guest' && (
@@ -163,8 +164,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             {t('সাইন ইন', 'Sign in')}
           </Link>
           )}
-          {/* A named guest can sign out; an anonymous guest has nothing to sign out of. */}
-          {session.kind === 'guest' && session.displayName && (
+          {session.kind === 'member' && (
+            <div className="flex flex-col gap-1 text-xs">
+              <Link to="/account/verification" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {isVerifiedMember ? t('যাচাইকৃত সদস্য ✓', 'Verified Member ✓') : t('যাচাইকৃত সদস্য হোন', 'Become a Verified Member')}
+              </Link>
+              <Link to="/account/appeals" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('আপিল', 'Appeals')}
+              </Link>
+              <Link to="/account/notifications" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('বিজ্ঞপ্তি ও ইমেইল', 'Notifications and email')}
+              </Link>
+            </div>
+          )}
+          {/* A member or a named guest can sign out; an anonymous guest has nothing to sign out of. */}
+          {(session.kind === 'member' || session.displayName) && (
           <button
             type="button"
             onClick={handleSignOut}

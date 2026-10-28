@@ -65,6 +65,24 @@ export const ReceiptPanel: React.FC<{ review: SubmittedReview; onDone: () => voi
           'Save the receipt below now. It will not be shown again and cannot be recovered if lost.',
         )}
       </p>
+      {Boolean(review.mediaUploaded) && (
+        <p className="text-sm text-emerald-800 dark:text-emerald-300">
+          {t(
+            `${review.mediaUploaded}টি ছবি/ভিডিও আপলোড হয়েছে; মডারেটর অনুমোদনের পর দেখা যাবে।`,
+            `${review.mediaUploaded} photo(s)/video uploaded; they appear after a moderator approves them.`,
+          )}
+        </p>
+      )}
+      {review.mediaFailed && review.mediaFailed.length > 0 && (
+        <div role="alert" className="p-3 rounded-xl bg-error-container text-sm text-red-900 dark:bg-red-950/40 dark:text-red-200">
+          <p className="font-semibold">{t('এগুলো যোগ করা যায়নি:', 'These could not be added:')}</p>
+          <ul className="list-disc pl-5">
+            {review.mediaFailed.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <dl className="p-4 rounded-xl bg-white dark:bg-dark-surface-2 border border-emerald-200 dark:border-emerald-800 font-mono text-xs text-on-surface dark:text-on-dark flex flex-col gap-2 break-all">
         <div>

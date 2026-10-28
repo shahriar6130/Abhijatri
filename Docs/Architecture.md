@@ -16,7 +16,8 @@ Supabase-managed PostgreSQL (schema app; source of truth)
 
 - The PWA talks **only** to the FastAPI API. It holds no Supabase key and never calls Supabase directly (no Supabase Auth, Data API, or client SDK).
 - All authorisation, moderation, receipt checks and rating arithmetic run on the server.
-- Redis, CDN and the media pipeline are deferred (Decisions.md, Scope control).
+- CDN and the media pipeline are deferred (Decisions.md, Scope control). Redis (Upstash) is used **only** for the visit and ops event counters (Decisions.md, 22 Oct 2026); the API reaches it over `rediss://`, and a Redis outage never fails a request.
+- The private ops dashboard (`ops/`, its own Vercel project) calls `/api/v1/ops/*` with a bearer token (`Docs/System-Monitoring-Dashboard.md`).
 
 ## 2. Backend structure (modular monolith)
 
@@ -53,6 +54,8 @@ Dependency direction: `api -> services -> models -> db`. Endpoints never perform
 | `GET /api/v1/staff/moderation/reviews` | staff | 501 in production until R04. |
 | `POST /api/v1/staff/moderation/reviews/{id}/decisions` | staff | Version-checked. |
 | `PUT /api/v1/staff/moderation/reviews/{id}/conflict` | staff | Locked rating transition. |
+| `POST /api/v1/guest-visits` | none | `{first_visit}` only; 204; Redis day counter. |
+| `GET /api/v1/ops/panels`, `/ops/panels/{id}`, `/ops/overview`, `POST /ops/jobs/visit-rollup` | ops token | Dashboard API; 404 while `OPS_DASHBOARD_TOKEN` is unset. |
 
 Planned endpoints (member reviews, reports, appeals, verification, roles) are listed in `Features/Review.md` section 9.2.
 
@@ -101,6 +104,10 @@ GitHub PR -> CI (lint, unit, PostgreSQL integration, migration, security, contra
 | `GUEST_SUBMIT_PER_SCOPE_PER_DAY`, `GUEST_SUBMIT_PER_NETWORK_PER_HOUR`, `GUEST_SUBMIT_PER_NETWORK_PER_DAY` | no | Durable limits for new Guest drafts (defaults 3, 30, 100). |
 | `RECEIPT_OPS_PER_RECEIPT_PER_HOUR`, `RECEIPT_OPS_PER_NETWORK_PER_HOUR`, `RECEIPT_FAILURES_SHORT_LIMIT`, `RECEIPT_FAILURES_LONG_LIMIT` | no | Receipt-operation limits (defaults 20, 100) and the failure tiers (5 per 15 minutes, 20 per 24 hours) that drive the progressive block. |
 | `GUEST_PENDING_PER_DESTINATION`, `GUEST_PENDING_TOTAL`, `GUEST_PENDING_ALERT_RATIO` | no | Pending Guest ceilings (50, 500); a warning is logged from 80 percent; reaching a ceiling returns `503 GUEST_WRITES_PAUSED`. |
+| `REDIS_URL` | prod: yes | Upstash `rediss://` URL for this environment (one database per environment). Production start-up fails if it is missing or not TLS. Locally `redis://localhost:6379/0` from `compose.yaml`. |
+| `RATE_LIMIT_GUEST_VISIT`, `GUEST_VISITS_PER_NETWORK_PER_HOUR` | no | Guest-visit limits: burst pre-filter (20/minute) and durable per-network cap (60/hour, then `429 RATE_LIMITED`). |
+| `REDIS_TIMEOUT_MS`, `VISIT_COUNTER_ENABLED`, `METRICS_FLUSH_SECONDS` | no | Redis command timeout (300 ms), the visit-counting kill switch, and the ops event flush interval (60 s). |
+| `OPS_DASHBOARD_TOKEN`, `OPS_AUTH_FAILURES_PER_NETWORK_PER_HOUR` | no | Bearer token for `/api/v1/ops` (≥ 32 chars in production; unset = 404) and the failure limit (10 per network per hour). |
 | `GUEST_WRITES_PAUSED` | no | Emergency switch. Pauses new Guest submissions only; reads, receipt status and recovery of an existing draft continue. |
 | `RATE_LIMIT_GUEST_SUBMIT`, `RATE_LIMIT_RECEIPT` | no | In-memory burst pre-filter per trusted address (defaults 5 and 10 per minute). Not the authoritative limiter. |
 
@@ -111,7 +118,8 @@ GitHub PR -> CI (lint, unit, PostgreSQL integration, migration, security, contra
 | Staging | `https://api.<owned-domain>` | Supabase `abhijatri-staging` | |
 | Production or pilot | `https://api.<owned-domain>` | Supabase `abhijatri-prod` | |
 | Public frontend (interim, Vercel) | `https://<project>.vercel.app` (fill in after first deploy) | uses the API above | |
-| API on Railway (not in the approved plan) | `https://abhijatri-backend.up.railway.app` | unknown; check its `DATABASE_URL` | 19 Oct 2026: live, but serving pre-merge code (`Docs/Frontend-Implemented.md` B4) |
+| API on Railway (not in the approved plan) | `https://abhijatri-backend.up.railway.app` | unknown; check its `DATABASE_URL` | 19 Oct 2026: live, but serving pre-merge code (`Docs/Frontend-Implemented.md` B4). 22 Oct 2026: deploys `main`, `APP_ENV=production`; ops token and CORS set, `REDIS_URL` still required before the 0009 code ships |
+| Ops dashboard (Vercel, private) | `https://abhijatri-ops-44afee.vercel.app` | calls the Railway API with the ops token | 22 Oct 2026: deployed from `ops/` |
 
 ### Public frontend deployment on Vercel (interim)
 

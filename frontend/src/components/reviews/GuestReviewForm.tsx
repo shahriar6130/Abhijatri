@@ -12,12 +12,15 @@ import {
   generateReceipt,
   getGuestScopeSecret,
   submitGuestReview,
+  submitMemberReview,
+  uploadReviewMedia,
 } from '../../api/reviews';
 import type { CategoryRatings as Ratings, ComfortTier, DestinationSummary, GuestReviewCreated, ReviewLanguage, TravellerType } from '../../types';
 import { currentDisplayMonth, pick } from '../../utils/format';
+import { photoMetadataComplete } from '../../utils/reviewPhotos';
 import { describeError } from '../common/StatusViews';
 import { CategoryRatings } from './CategoryRatings';
-import { ReviewPhotos, type ReviewPhoto } from './ReviewPhotos';
+import { ReviewPhotos, SERVER_MEDIA_TEXT, type ReviewPhoto } from './ReviewPhotos';
 import { TURNSTILE_SITE_KEY, TurnstileWidget } from './TurnstileWidget';
 
 /** Must match the API's expected Turnstile action (backend app/turnstile.py). */
@@ -27,6 +30,9 @@ import { COMFORT_TIERS, FIELD_ERROR_LABEL, REVIEW_LANGUAGES, TRAVELLER_TYPES } f
 export interface SubmittedReview extends GuestReviewCreated {
   receipt: string;
   destinationId: string;
+  /** Member reviews: how many photos/videos were uploaded, and the names of any that were refused. */
+  mediaUploaded?: number;
+  mediaFailed?: string[];
 }
 
 interface DraftIdentity {
@@ -49,6 +55,8 @@ export const GuestReviewForm: React.FC<{
 }> = ({ destinations, initialDestinationId, onSubmitted }) => {
   const { language, t } = useLanguage();
   const { session } = useSession();
+  // A signed-in member posts under their account name, needs no security check and may add media.
+  const isMember = session.kind === 'member';
   const maxMonth = currentDisplayMonth();
   // Limits and category prompts come from the API (API.md 5.15); local values are the fallback.
   const { data: parameters } = useApiResource(() => getReviewParameters(), []);
@@ -82,6 +90,7 @@ export const GuestReviewForm: React.FC<{
   // One identity per draft: every retry reuses it so the server can recover a lost response.
   const [identity, setIdentity] = useState<DraftIdentity>(newIdentity);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   // Bumped on every failed submit; the effect below then moves to the topmost error.
@@ -113,7 +122,7 @@ export const GuestReviewForm: React.FC<{
   const validate = (): Record<string, string> => {
     const errors: Record<string, string> = {};
     if (!destinationId) errors.destination_id = t('একটি গন্তব্য বেছে নিন।', 'Choose a destination.');
-    if (length(displayName) < 1 || length(displayName) > nameMax)
+    if (!isMember && (length(displayName) < 1 || length(displayName) > nameMax))
       errors.guest_display_name = t(
         `প্রদর্শন নাম ১ থেকে ${nameMax} অক্ষরের হতে হবে।`,
         `Display name must be 1 to ${nameMax} characters.`,
@@ -132,7 +141,12 @@ export const GuestReviewForm: React.FC<{
         `A note is required: write ${noteMin} to ${noteMax} characters.`,
       );
     if (!consent) errors.consent = t('জমা দেওয়ার আগে নোটিশে সম্মতি দিন।', 'Agree to the notice before submitting.');
-    if (TURNSTILE_SITE_KEY && !turnstileToken)
+    if (photos.some((photo) => !photoMetadataComplete(photo)))
+      errors.media = t(
+        'প্রতিটি ছবি ও ভিডিওর বিবরণ লিখুন এবং মালিকানার ঘোষণায় টিক দিন।',
+        'Describe every photo and video and tick the ownership declaration.',
+      );
+    if (!isMember && TURNSTILE_SITE_KEY && !turnstileToken)
       errors.turnstile = t('নিরাপত্তা যাচাইটি সম্পন্ন করুন।', 'Complete the security check.');
     return errors;
   };
@@ -149,8 +163,7 @@ export const GuestReviewForm: React.FC<{
 
     setSubmitting(true);
     try {
-      const created = await submitGuestReview({
-        ...buildGuestReviewPayload({
+      const guestPayload = buildGuestReviewPayload({
           destinationId,
           clientDraftId: identity.clientDraftId,
           receipt: identity.receipt,
@@ -164,10 +177,31 @@ export const GuestReviewForm: React.FC<{
           note: body,
           overallRating: rating,
           categoryRatings,
-        }),
-        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
-      });
-      onSubmitted({ ...created, receipt: identity.receipt, destinationId });
+        });
+      let created: GuestReviewCreated;
+      let mediaUploaded = 0;
+      const mediaFailed: string[] = [];
+      if (isMember) {
+        const { guest_scope_secret: _scope, guest_display_name: _name, ...memberPayload } = guestPayload;
+        created = await submitMemberReview(memberPayload);
+        // The review exists now; a refused file does not undo it, it is reported on the receipt.
+        if (!created.duplicate_recovered) {
+          for (const [index, photo] of photos.entries()) {
+            setUploadProgress({ done: index, total: photos.length });
+            try {
+              await uploadReviewMedia(created.review_id, photo);
+              mediaUploaded += 1;
+            } catch (uploadError: unknown) {
+              const code = uploadError instanceof ApiError ? uploadError.fieldErrors[0]?.code : undefined;
+              const reason = code && SERVER_MEDIA_TEXT[code] ? t(...SERVER_MEDIA_TEXT[code]) : describeError(uploadError, t);
+              mediaFailed.push(`${photo.file.name}: ${reason}`);
+            }
+          }
+        }
+      } else {
+        created = await submitGuestReview({ ...guestPayload, ...(turnstileToken ? { turnstile_token: turnstileToken } : {}) });
+      }
+      onSubmitted({ ...created, receipt: identity.receipt, destinationId, mediaUploaded, mediaFailed });
       setIdentity(newIdentity());
       setTitle('');
       setBody('');
@@ -196,6 +230,7 @@ export const GuestReviewForm: React.FC<{
       setErrorFocusRequest((n) => n + 1);
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
       setTurnstileKey((n) => n + 1);
     }
   };
@@ -233,9 +268,15 @@ export const GuestReviewForm: React.FC<{
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {isMember ? (
+          <div className="flex flex-col gap-1.5">
+            <span className={labelClass}>{t('যে নামে প্রকাশিত হবে', 'Published as')}</span>
+            <p className="min-h-[44px] flex items-center text-sm font-semibold text-on-surface dark:text-on-dark">{session.displayName}</p>
+          </div>
+        ) : (
         <div className="flex flex-col gap-1.5">
           <label htmlFor="review-name" className={labelClass}>
-            {t('প্রদর্শন নাম (প্রকাশিত হবে)', 'Display name (shown publicly)')}
+            {t('আপনার নাম (শুধু মডারেটর দেখবেন; প্রকাশ্যে "বেনামী অতিথি" দেখাবে)', 'Your name (seen only by moderators; shown publicly as "Anonymous guest")')}
           </label>
           <input
             id="review-name"
@@ -249,6 +290,7 @@ export const GuestReviewForm: React.FC<{
           />
           {errorFor('guest_display_name')}
         </div>
+        )}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="review-month" className={labelClass}>
             {t('ভ্রমণের মাস', 'Month of visit')}
@@ -393,15 +435,21 @@ export const GuestReviewForm: React.FC<{
         {errorFor('body')}
       </div>
 
-      <ReviewPhotos photos={photos} onChange={setPhotos} />
+      <div className="flex flex-col gap-1.5">
+        <ReviewPhotos photos={photos} onChange={setPhotos} />
+        {errorFor('media')}
+      </div>
 
       <div className="p-4 rounded-xl bg-surface-container/60 dark:bg-dark-surface-2 flex flex-col gap-3 text-xs text-on-surface-variant dark:text-on-dark-muted">
         <p className="flex gap-2">
           <ShieldCheck size={16} className="text-forest-primary dark:text-neon-lime shrink-0" aria-hidden="true" />
           <span>
-            {t(
-              'আপনার রিভিউ একজন মডারেটর পড়ার পর প্রকাশিত হবে, প্রদর্শন নামসহ এবং "অতিথি" লেবেলে। অতিথি রেটিং শুধু আলাদা "অতিথি মতামত"-এ গণনা হয়। জমা দেওয়ার পর একটি রিসিপ্ট একবারই দেখানো হবে; সেটি দিয়ে অবস্থা দেখা ও প্রত্যাহার করা যাবে। হারানো রিসিপ্ট পুনরুদ্ধার করা যায় না।',
-              'A moderator reads your review before it is published with your display name and a "Guest" label. Guest ratings count only towards the separate Guest Feedback. After submitting you see a receipt once; it lets you check status and withdraw. A lost receipt cannot be recovered.',
+            {isMember ? t(
+              'আপনার রিভিউ, ছবি ও ভিডিও একজন মডারেটর দেখার পর আপনার নামে প্রকাশিত হবে। জমা দেওয়ার পর একটি রিসিপ্ট একবারই দেখানো হবে; সেটি দিয়ে অবস্থা দেখা ও প্রত্যাহার করা যাবে।',
+              'A moderator checks your review, photos and video before they are published under your name. After submitting you see a receipt once; it lets you check status and withdraw.',
+            ) : t(
+              'আপনার রিভিউ একজন মডারেটর পড়ার পর প্রকাশিত হবে "বেনামী অতিথি" হিসেবে। এই ব্রাউজার থেকে দেওয়া আপনার সব রিভিউতে একই অতিথি ট্যাগ দেখানো হবে, যাতে পাঠকরা বুঝতে পারেন সেগুলো একই অতিথির। অতিথি রেটিং শুধু আলাদা "অতিথি মতামত"-এ গণনা হয়। জমা দেওয়ার পর একটি রিসিপ্ট একবারই দেখানো হবে; সেটি দিয়ে অবস্থা দেখা ও প্রত্যাহার করা যাবে। হারানো রিসিপ্ট পুনরুদ্ধার করা যায় না।',
+              'A moderator reads your review before it is published as "Anonymous guest". Your reviews from this browser show the same guest tag, so readers can see they came from the same guest. Guest ratings count only towards the separate Guest Feedback. After submitting you see a receipt once; it lets you check status and withdraw. A lost receipt cannot be recovered.',
             )}
           </span>
         </p>
@@ -418,7 +466,7 @@ export const GuestReviewForm: React.FC<{
         {errorFor('consent')}
       </div>
 
-      {TURNSTILE_SITE_KEY && (
+      {!isMember && TURNSTILE_SITE_KEY && (
         <div aria-describedby={describedBy('turnstile')}>
           <TurnstileWidget key={turnstileKey} action={TURNSTILE_ACTION} onToken={setTurnstileToken} />
           {errorFor('turnstile')}
@@ -437,7 +485,11 @@ export const GuestReviewForm: React.FC<{
         className="self-start inline-flex items-center gap-2 min-h-[44px] px-6 rounded-full bg-forest-primary text-white dark:bg-neon-lime dark:text-dark-bg-base text-sm font-bold font-title disabled:opacity-60"
       >
         <Send size={16} aria-hidden="true" />
-        {submitting ? t('জমা হচ্ছে…', 'Submitting…') : t('রিভিউ জমা দিন', 'Submit review')}
+        {uploadProgress
+          ? t(`আপলোড হচ্ছে ${uploadProgress.done + 1}/${uploadProgress.total}…`, `Uploading ${uploadProgress.done + 1} of ${uploadProgress.total}…`)
+          : submitting
+            ? t('জমা হচ্ছে…', 'Submitting…')
+            : t('রিভিউ জমা দিন', 'Submit review')}
       </button>
     </form>
   );

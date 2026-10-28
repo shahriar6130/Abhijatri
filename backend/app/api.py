@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session
 
-from app import abuse
+from app import abuse, media, visits
 from app import review_parameters as rp
 from app.abuse import CounterSessions
 from app.client_address import network_digest, trusted_client_address
@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.destination_api import public_cache_headers
 from app.errors import ApiError
-from app.guest_services import guest_visit_stats, record_guest_visit
+from app.guest_tag import display_guest_tag
 from app.limits import guest_submit_limit, guest_visit_limit, limiter, receipt_limit
 from app.models import (
     DestinationRatingStats,
@@ -31,16 +31,15 @@ from app.models import (
     User,
     UserPlatformRole,
 )
+from app.ops import events
+from app.redis_client import RedisDep
 from app.schemas import (
     CategoryParameter,
     ChoiceOption,
     ConflictFlagRequest,
-    DailyGuestVisits,
     GuestReviewCreate,
     GuestReviewCreated,
     GuestVisitRequest,
-    GuestVisitResponse,
-    GuestVisitStats,
     HealthResponse,
     LocalizedText,
     ModerationQueueItem,
@@ -69,6 +68,7 @@ from app.services import (
     verify_receipt,
     withdraw_review,
 )
+from app.storage import StorageClient, get_storage
 from app.turnstile import ACTION_GUEST_REVIEW, TurnstileDep
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,7 @@ def create_guest_review(
         # 7. Business transaction.
         result = submit_guest_review(session, payload)
         session.commit()
+        events.count("reviews.submitted")
     except ReviewError as error:
         session.rollback()
         _raise_service_error(error)
@@ -243,38 +244,23 @@ def review_parameters(request: Request, response: Response) -> ReviewParameters:
     )
 
 
-@router.post("/guest-visits", response_model=GuestVisitResponse)
+@router.post("/guest-visits", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit(guest_visit_limit)
 def create_guest_visit(
     request: Request,
     payload: GuestVisitRequest,
     sessions: CounterSessions,
-    session: Session = Depends(get_session),
-) -> GuestVisitResponse:
-    """Count one guest visit: only a running number and the time are stored, never who."""
-    del payload  # always empty; declared so any field (a name, a device id) is a 422
+    redis_client: RedisDep,
+) -> Response:
+    """Count one guest visit-day in Redis (Guest-Identity-and-Visits 4.2). Nothing identifies the guest.
+
+    The browser sends this at most once per Dhaka day. Counting is best effort: a Redis failure is
+    recorded in ``visits_dropped`` and the response is still 204.
+    """
     abuse.enforce(sessions, abuse.guest_visit_checks(get_settings(), network_digest(request)))
-    visit_number = record_guest_visit(session)
-    session.commit()
-    _, today, _ = guest_visit_stats(session, days=1)
-    return GuestVisitResponse(visit_number=visit_number, visits_today=today)
-
-
-@router.get("/guest-visits/stats", response_model=GuestVisitStats)
-@limiter.limit("60/minute")
-def guest_visits_stats(
-    request: Request,
-    response: Response,
-    days: int = Query(default=30, ge=1, le=90),
-    session: Session = Depends(get_session),
-) -> GuestVisitStats:
-    total, today, daily = guest_visit_stats(session, days=days)
-    response.headers.update(public_cache_headers())
-    return GuestVisitStats(
-        total_visits=total,
-        visits_today=today,
-        daily=[DailyGuestVisits(date=day, visits=visits) for day, visits in daily],
-    )
+    if get_settings().visit_counter_enabled:
+        visits.record_visit(redis_client, "guest", new=payload.first_visit)
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/staff/moderation/reviews", response_model=list[ModerationQueueItem])
@@ -299,6 +285,7 @@ def moderation_queue(
             counted_rating=review.counted_rating,
             destination_id=review.destination_id,
             guest_display_name=review.guest_display_name,
+            guest_tag=display_guest_tag(review.guest_tag),
             overall_rating=review.overall_rating,
             title=revision.title,
             body=revision.body,
@@ -396,6 +383,7 @@ def public_reviews(
     after: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage),
 ) -> ReviewFeed:
     statement = (
         select(Review, ReviewRevision)
@@ -420,16 +408,22 @@ def public_reviews(
     has_more = len(rows) > limit
     rows = rows[:limit]
     categories = revision_category_ratings(session, [revision.id for _, revision in rows])
+    attached = media.published_media(session, storage, [review.id for review, _ in rows])
+    author_ids = {review.author_user_id for review, _ in rows if review.author_user_id}
+    authors = dict(session.execute(select(User.id, User.display_name).where(User.id.in_(author_ids))).all()) if author_ids else {}
     items = [
         PublicReview(
             id=review.id,
-            guest_display_name=review.guest_display_name,
+            author_type="MEMBER" if review.author_user_id else "GUEST",
+            guest_tag=display_guest_tag(review.guest_tag),
             status=review.status,
             overall_rating=review.overall_rating,
             published_at=review.published_at,
             title=revision.title,
             body=revision.body,
             category_ratings=categories[revision.id],
+            author_display_name=authors.get(review.author_user_id) if review.author_user_id else None,
+            media=attached.get(review.id, []),
         )
         for review, revision in rows
         if review.published_at is not None

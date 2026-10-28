@@ -1,0 +1,29 @@
+name: Nightly visit roll-up
+
+# Copies yesterday's visit counters from Upstash into visit_daily_stats
+# (Docs/Guest-Identity-and-Visits.md 4.5). 18:15 UTC = 00:15 Asia/Dhaka. The route is
+# idempotent, and opening the dashboard also catches up the last 7 days, so a missed run loses nothing.
+on:
+  schedule:
+    - cron: "15 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rollup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the roll-up
+        env:
+          OPS_API_URL: ${{ secrets.OPS_API_URL }}
+          OPS_DASHBOARD_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+        run: |
+          if [ -z "$OPS_API_URL" ] || [ -z "$OPS_DASHBOARD_TOKEN" ]; then
+            echo "OPS_API_URL / OPS_DASHBOARD_TOKEN secrets are not set; skipping."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 60 --retry 3 --retry-all-errors \
+            -X POST "${OPS_API_URL%/}/api/v1/ops/jobs/visit-rollup" \
+            -H "Authorization: Bearer ${OPS_DASHBOARD_TOKEN}"

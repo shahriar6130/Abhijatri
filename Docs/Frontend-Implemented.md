@@ -14,9 +14,9 @@
 |---|---|---|---|
 | F03 | Bilingual information architecture and component plan | 12 to 14 Oct | **Plan written 20 Oct, awaiting approval:** `Docs/UI-Architecture.md` (language rules, sitemap, flows, component map, fonts, audit). Follow-ups U1 to U6 listed there. |
 | R03 | Bilingual destination list and detail screens | 15 to 22 Oct | **Implemented** against the R02 API, with loading, error and empty states (section 2). |
-| R05 | Account, verification and session screens | 18 to 23 Oct | **Sign-in screen built, disabled** until R04 exists (section 3a). Registration, verification and session screens wait for R04. |
+| R05 | Account, verification and session screens | 18 to 23 Oct | **Implemented 27 Oct** with R04: `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password`, server-backed session, `/account/verification`, `/account/appeals`, `/account/notifications` (28 Oct). See `Docs/R04-R05-Checklist.md`. |
 | R12 | Installable PWA shell, cached public destination views | 19 to 25 Oct | Not started. No manifest, service worker or IndexedDB yet. |
-| R09 | Review form, list, filters, author controls | 20 to 27 Oct | **Guest path implemented** (section 3). Member path waits for R04 and R07; filters not started. |
+| R09 | Review form, list, filters, author controls | 20 to 27 Oct | **Guest and member paths implemented**; members add photos and one video (27 Oct). Filters not started. |
 | R13, R15 | Offline pack, offline drafts | 23 to 31 Oct | Not started. |
 
 ## 2. R03: Destination list and detail screens

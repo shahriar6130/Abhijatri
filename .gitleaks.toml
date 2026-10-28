@@ -1,0 +1,11 @@
+# gitleaks configuration: all default rules, plus one narrowly scoped exception.
+# CI (gitleaks/gitleaks-action) picks this file up from the repository root.
+
+title = "Abhijatri gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Published guest-tag test vector (Docs/Guest-Identity-and-Visits.md 3.1); base64 of 'foobar-test-vector-not-a-real-secret-' padding, used by the backend and frontend parity tests"
+regexes = ['''^Zm9vYmFyLXRlc3QtdmVjdG9yLW5vdC1hLXJlYWwtc2VjcmV0LTAwMDAwMDAwMDAw$''']

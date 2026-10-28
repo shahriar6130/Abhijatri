@@ -7,7 +7,14 @@
 
 import type { ApiErrorBody, FieldError } from '../types';
 
-export const API_BASE_URL: string = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+/**
+ * In a production build the app calls `/api/...` on its own address and Vercel forwards it to the
+ * API (vercel.json). The session cookies then belong to this site, so browsers keep them; cookies of
+ * another site (the Railway API) are not sent on cross-site requests. Set VITE_API_DIRECT=true only
+ * when the API is served from the same site. Development uses VITE_API_BASE_URL (localhost:8000).
+ */
+const configuredApi = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+export const API_BASE_URL: string = import.meta.env.PROD && import.meta.env.VITE_API_DIRECT !== 'true' ? '' : configuredApi;
 
 export class ApiError extends Error {
   status: number;

@@ -1,6 +1,27 @@
 {
   "components": {
     "schemas": {
+      "ActivateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "pattern": "^(in_app|email)$",
+            "title": "Channel",
+            "type": "string"
+          },
+          "locale": {
+            "pattern": "^(bn|en)$",
+            "title": "Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "locale"
+        ],
+        "title": "ActivateBody",
+        "type": "object"
+      },
       "Advisory": {
         "properties": {
           "effective_on": {
@@ -75,6 +96,182 @@
         ],
         "title": "AdvisorySeverity",
         "type": "string"
+      },
+      "AppealBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_type": {
+            "pattern": "^(moderation_action|enforcement_case|verification_case)$",
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_id",
+          "reason"
+        ],
+        "title": "AppealBody",
+        "type": "object"
+      },
+      "AppealDecisionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Note",
+            "type": "string"
+          },
+          "outcome": {
+            "pattern": "^(upheld|overturned)$",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "expected_version",
+          "note",
+          "task_id",
+          "lease_token"
+        ],
+        "title": "AppealDecisionBody",
+        "type": "object"
+      },
+      "AssignBody": {
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "AssignBody",
+        "type": "object"
+      },
+      "BulkBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BulkItem"
+            },
+            "maxItems": 25,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BulkBody",
+        "type": "object"
+      },
+      "BulkItem": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE)$",
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "rejected_media_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Rejected Media Ids",
+            "type": "array"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "lease_token",
+          "expected_version",
+          "decision",
+          "reason_code",
+          "review_id"
+        ],
+        "title": "BulkItem",
+        "type": "object"
       },
       "CategoryAverage": {
         "properties": {
@@ -205,6 +402,45 @@
           "count"
         ],
         "title": "CommunityRatingSummary",
+        "type": "object"
+      },
+      "ConflictBody": {
+        "additionalProperties": false,
+        "properties": {
+          "conflict_declared": {
+            "title": "Conflict Declared",
+            "type": "boolean"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "conflict_declared",
+          "reason_code"
+        ],
+        "title": "ConflictBody",
         "type": "object"
       },
       "ConflictFlagRequest": {
@@ -346,23 +582,65 @@
         "title": "ContactKind",
         "type": "string"
       },
-      "DailyGuestVisits": {
+      "DecisionBody": {
+        "additionalProperties": false,
         "properties": {
-          "date": {
-            "format": "date",
-            "title": "Date",
+          "decision": {
+            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE)$",
+            "title": "Decision",
             "type": "string"
           },
-          "visits": {
-            "title": "Visits",
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
             "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "rejected_media_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Rejected Media Ids",
+            "type": "array"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
           }
         },
         "required": [
-          "date",
-          "visits"
+          "task_id",
+          "lease_token",
+          "expected_version",
+          "decision",
+          "reason_code"
         ],
-        "title": "DailyGuestVisits",
+        "title": "DecisionBody",
         "type": "object"
       },
       "DestinationList": {
@@ -726,6 +1004,211 @@
         "title": "DestinationSummary",
         "type": "object"
       },
+      "EmailRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "turnstile_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnstile Token"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "EmailRequest",
+        "type": "object"
+      },
+      "EnforcementActionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "pattern": "^(remove|restore|close|reverse_sanction)$",
+            "title": "Action",
+            "type": "string"
+          },
+          "counts_toward_rating": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counts Toward Rating"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "sanction_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanction Id"
+          }
+        },
+        "required": [
+          "action",
+          "expected_version",
+          "reason_code"
+        ],
+        "title": "EnforcementActionBody",
+        "type": "object"
+      },
+      "EnforcementBody": {
+        "additionalProperties": false,
+        "properties": {
+          "counts_toward_rating": {
+            "default": true,
+            "title": "Counts Toward Rating",
+            "type": "boolean"
+          },
+          "emergency": {
+            "default": false,
+            "title": "Emergency",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Id"
+          },
+          "sanction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SanctionBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "EnforcementBody",
+        "type": "object"
+      },
+      "EscalateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_token",
+          "reason"
+        ],
+        "title": "EscalateBody",
+        "type": "object"
+      },
+      "EvidenceBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "maxLength": 80,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "EvidenceBody",
+        "type": "object"
+      },
       "GuestFeedbackSummary": {
         "properties": {
           "average": {
@@ -863,9 +1346,7 @@
         "required": [
           "destination_id",
           "client_draft_id",
-          "guest_scope_secret",
           "receipt_secret",
-          "guest_display_name",
           "language",
           "traveller_type",
           "comfort_tier",
@@ -873,7 +1354,9 @@
           "title",
           "body",
           "overall_rating",
-          "consent_version"
+          "consent_version",
+          "guest_scope_secret",
+          "guest_display_name"
         ],
         "title": "GuestReviewCreate",
         "type": "object"
@@ -908,53 +1391,17 @@
       },
       "GuestVisitRequest": {
         "additionalProperties": false,
-        "description": "Deliberately empty: nothing about the guest is sent or stored, not even a device id.",
-        "properties": {},
+        "description": "Exactly one boolean (Guest-Identity-and-Visits 4.2). Any other field, such as a name, tag,\nsecret or device id, is a 422 ``UNKNOWN_FIELD``.",
+        "properties": {
+          "first_visit": {
+            "title": "First Visit",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "first_visit"
+        ],
         "title": "GuestVisitRequest",
-        "type": "object"
-      },
-      "GuestVisitResponse": {
-        "properties": {
-          "visit_number": {
-            "title": "Visit Number",
-            "type": "integer"
-          },
-          "visits_today": {
-            "title": "Visits Today",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "visit_number",
-          "visits_today"
-        ],
-        "title": "GuestVisitResponse",
-        "type": "object"
-      },
-      "GuestVisitStats": {
-        "properties": {
-          "daily": {
-            "items": {
-              "$ref": "#/components/schemas/DailyGuestVisits"
-            },
-            "title": "Daily",
-            "type": "array"
-          },
-          "total_visits": {
-            "title": "Total Visits",
-            "type": "integer"
-          },
-          "visits_today": {
-            "title": "Visits Today",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total_visits",
-          "visits_today",
-          "daily"
-        ],
-        "title": "GuestVisitStats",
         "type": "object"
       },
       "GuideCategory": {
@@ -1041,6 +1488,21 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LeaseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_token"
+        ],
+        "title": "LeaseBody",
+        "type": "object"
+      },
       "LocalizedText": {
         "properties": {
           "bn": {
@@ -1057,6 +1519,322 @@
           "en"
         ],
         "title": "LocalizedText",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MediaDecisionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "pattern": "^(approve|reject)$",
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason_code"
+        ],
+        "title": "MediaDecisionBody",
+        "type": "object"
+      },
+      "MediaIntent": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "media_id": {
+            "format": "uuid",
+            "title": "Media Id",
+            "type": "string"
+          },
+          "upload_url": {
+            "title": "Upload Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_id",
+          "kind",
+          "upload_url",
+          "max_bytes"
+        ],
+        "title": "MediaIntent",
+        "type": "object"
+      },
+      "MediaIntentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "alt_text": {
+            "maxLength": 250,
+            "minLength": 1,
+            "title": "Alt Text",
+            "type": "string"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "content_type": {
+            "maxLength": 40,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "ownership_declared": {
+            "const": true,
+            "title": "Ownership Declared",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "minimum": 1.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_type",
+          "size_bytes",
+          "alt_text",
+          "ownership_declared"
+        ],
+        "title": "MediaIntentRequest",
+        "type": "object"
+      },
+      "MediaStatus": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "content_type"
+        ],
+        "title": "MediaStatus",
+        "type": "object"
+      },
+      "MemberReviewCreate": {
+        "additionalProperties": false,
+        "description": "A signed-in member's review: the author and public name come from the session (Review.md 3.3).",
+        "properties": {
+          "body": {
+            "maxLength": 6000,
+            "minLength": 20,
+            "title": "Body",
+            "type": "string"
+          },
+          "category_ratings": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maximum": 5.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "maxProperties": 7,
+                "propertyNames": {
+                  "$ref": "#/components/schemas/ReviewCategory"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Ratings"
+          },
+          "client_draft_id": {
+            "format": "uuid",
+            "title": "Client Draft Id",
+            "type": "string"
+          },
+          "comfort_tier": {
+            "$ref": "#/components/schemas/ComfortTier"
+          },
+          "consent_version": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Consent Version",
+            "type": "string"
+          },
+          "destination_id": {
+            "format": "uuid",
+            "title": "Destination Id",
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/ReviewLanguage"
+          },
+          "overall_rating": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Overall Rating",
+            "type": "integer"
+          },
+          "receipt_secret": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Receipt Secret",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 160,
+            "minLength": 3,
+            "title": "Title",
+            "type": "string"
+          },
+          "traveller_type": {
+            "$ref": "#/components/schemas/TravellerType"
+          },
+          "visit_month": {
+            "format": "date",
+            "title": "Visit Month",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination_id",
+          "client_draft_id",
+          "receipt_secret",
+          "language",
+          "traveller_type",
+          "comfort_tier",
+          "visit_month",
+          "title",
+          "body",
+          "overall_rating",
+          "consent_version"
+        ],
+        "title": "MemberReviewCreate",
+        "type": "object"
+      },
+      "MfaVerifyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^\\d{6}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "factor_id": {
+            "maxLength": 64,
+            "minLength": 8,
+            "title": "Factor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id",
+          "code"
+        ],
+        "title": "MfaVerifyRequest",
         "type": "object"
       },
       "ModerationQueueItem": {
@@ -1107,6 +1885,17 @@
               }
             ],
             "title": "Guest Display Name"
+          },
+          "guest_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Tag"
           },
           "overall_rating": {
             "title": "Overall Rating",
@@ -1225,6 +2014,63 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "NotificationPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read"
+          }
+        },
+        "title": "NotificationPatch",
+        "type": "object"
+      },
+      "PreferencesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "digest_local_time": {
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "title": "Digest Local Time",
+            "type": "string"
+          },
+          "digest_timezone": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Digest Timezone",
+            "type": "string"
+          },
+          "standard_email_mode": {
+            "pattern": "^(immediate|digest|off)$",
+            "title": "Standard Email Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "standard_email_mode",
+          "digest_timezone",
+          "digest_local_time"
+        ],
+        "title": "PreferencesBody",
+        "type": "object"
+      },
       "Provenance": {
         "description": "Public source metadata. Researcher and reviewer names stay internal.",
         "properties": {
@@ -1278,8 +2124,110 @@
         "title": "Provenance",
         "type": "object"
       },
+      "PublicMedia": {
+        "description": "An approved photo or video. `url` is a signed link that works for about an hour.",
+        "properties": {
+          "alt_text": {
+            "title": "Alt Text",
+            "type": "string"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "content_type",
+          "url",
+          "alt_text"
+        ],
+        "title": "PublicMedia",
+        "type": "object"
+      },
       "PublicReview": {
         "properties": {
+          "author_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Display Name"
+          },
+          "author_type": {
+            "enum": [
+              "GUEST",
+              "MEMBER"
+            ],
+            "title": "Author Type",
+            "type": "string"
+          },
           "body": {
             "title": "Body",
             "type": "string"
@@ -1294,7 +2242,7 @@
             "title": "Category Ratings",
             "type": "object"
           },
-          "guest_display_name": {
+          "guest_tag": {
             "anyOf": [
               {
                 "type": "string"
@@ -1303,12 +2251,19 @@
                 "type": "null"
               }
             ],
-            "title": "Guest Display Name"
+            "title": "Guest Tag"
           },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/PublicMedia"
+            },
+            "title": "Media",
+            "type": "array"
           },
           "overall_rating": {
             "title": "Overall Rating",
@@ -1329,7 +2284,7 @@
         },
         "required": [
           "id",
-          "guest_display_name",
+          "author_type",
           "status",
           "overall_rating",
           "published_at",
@@ -1398,6 +2353,33 @@
           "category_averages"
         ],
         "title": "RatingRules",
+        "type": "object"
+      },
+      "ReauthRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "password": {
+            "maxLength": 128,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "ReauthRequest",
         "type": "object"
       },
       "ReceiptStatus": {
@@ -1481,6 +2463,194 @@
           "receipt_secret"
         ],
         "title": "ReceiptStatusRequest",
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "title": "Password",
+            "type": "string"
+          },
+          "turnstile_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnstile Token"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "display_name"
+        ],
+        "title": "RegisterRequest",
+        "type": "object"
+      },
+      "RemovalBody": {
+        "additionalProperties": false,
+        "properties": {
+          "removal_reason": {
+            "maxLength": 300,
+            "minLength": 3,
+            "title": "Removal Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "removal_reason"
+        ],
+        "title": "RemovalBody",
+        "type": "object"
+      },
+      "ReportBody": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "reason_code": {
+            "pattern": "^(spam|offensive|false_information|privacy|conflict_of_interest|other)$",
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ReportBody",
+        "type": "object"
+      },
+      "ReportTransitionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^(in_review|actioned|dismissed)$",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "expected_version",
+          "reason_code",
+          "task_id",
+          "lease_token"
+        ],
+        "title": "ReportTransitionBody",
+        "type": "object"
+      },
+      "ResetConfirmRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "new_password": {
+            "maxLength": 128,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token_hash": {
+            "maxLength": 512,
+            "minLength": 8,
+            "title": "Token Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_hash",
+          "new_password"
+        ],
+        "title": "ResetConfirmRequest",
+        "type": "object"
+      },
+      "RespondBody": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "title": "RespondBody",
+        "type": "object"
+      },
+      "RetryBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 300,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RetryBody",
         "type": "object"
       },
       "ReviewCategory": {
@@ -1638,6 +2808,114 @@
         "title": "ReviewStatus",
         "type": "string"
       },
+      "RoleBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "pattern": "^(moderator|superadmin)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RoleBody",
+        "type": "object"
+      },
+      "RuleBody": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "pattern": "^(critical|high|normal|low)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          }
+        },
+        "title": "RuleBody",
+        "type": "object"
+      },
+      "SanctionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "kind": {
+            "pattern": "^(warning|posting_restriction|suspension)$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "review_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review On"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "SanctionBody",
+        "type": "object"
+      },
       "SourceType": {
         "enum": [
           "OFFICIAL",
@@ -1648,6 +2926,87 @@
         ],
         "title": "SourceType",
         "type": "string"
+      },
+      "SuppressionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "default": "email",
+            "pattern": "^email$",
+            "title": "Channel",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "reason_code"
+        ],
+        "title": "SuppressionBody",
+        "type": "object"
+      },
+      "TemplateDraftBody": {
+        "additionalProperties": false,
+        "properties": {
+          "body_template": {
+            "maxLength": 600,
+            "minLength": 1,
+            "title": "Body Template",
+            "type": "string"
+          },
+          "channel": {
+            "pattern": "^(in_app|email)$",
+            "title": "Channel",
+            "type": "string"
+          },
+          "locale": {
+            "pattern": "^(bn|en)$",
+            "title": "Locale",
+            "type": "string"
+          },
+          "subject_template": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Template"
+          },
+          "title_template": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Template"
+          }
+        },
+        "required": [
+          "channel",
+          "locale",
+          "body_template"
+        ],
+        "title": "TemplateDraftBody",
+        "type": "object"
       },
       "TextParameter": {
         "properties": {
@@ -1728,6 +3087,93 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VerificationBody": {
+        "additionalProperties": false,
+        "properties": {
+          "statement": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement"
+          }
+        },
+        "title": "VerificationBody",
+        "type": "object"
+      },
+      "VerificationTransitionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^(in_review|needs_clarification|approved|rejected|escalated)$",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "expected_version",
+          "reason_code",
+          "task_id",
+          "lease_token"
+        ],
+        "title": "VerificationTransitionBody",
+        "type": "object"
+      },
+      "VerifyEmailRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "token_hash": {
+            "maxLength": 512,
+            "minLength": 8,
+            "title": "Token Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_hash"
+        ],
+        "title": "VerifyEmailRequest",
+        "type": "object"
+      },
       "WithdrawRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1759,6 +3205,2538 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/appeals/{appeal_id}/decision": {
+      "post": {
+        "operationId": "decide_appeal_api_v1_admin_appeals__appeal_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "appeal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Appeal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealDecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Appeal Api V1 Admin Appeals  Appeal Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Appeal",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/audit-events": {
+      "get": {
+        "operationId": "audit_events_api_v1_admin_audit_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Events Api V1 Admin Audit Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Events",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/audit-events/{event_id}": {
+      "get": {
+        "operationId": "audit_event_api_v1_admin_audit_events__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Event Api V1 Admin Audit Events  Event Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Event",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/bulk/moderation-actions": {
+      "post": {
+        "description": "Each item is atomic on its own; the batch may partly succeed (spec 8.4).",
+        "operationId": "bulk_moderate_api_v1_admin_bulk_moderation_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Bulk Moderate Api V1 Admin Bulk Moderation Actions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Moderate",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/enforcement-cases": {
+      "get": {
+        "operationId": "enforcement_cases_api_v1_admin_enforcement_cases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 12,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Enforcement Cases Api V1 Admin Enforcement Cases Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enforcement Cases",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "open_enforcement_api_v1_admin_enforcement_cases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnforcementBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Open Enforcement Api V1 Admin Enforcement Cases Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Open Enforcement",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/enforcement-cases/{case_id}/actions": {
+      "post": {
+        "operationId": "enforcement_action_api_v1_admin_enforcement_cases__case_id__actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnforcementActionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Enforcement Action Api V1 Admin Enforcement Cases  Case Id  Actions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enforcement Action",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/media": {
+      "get": {
+        "description": "Recent review photos and videos, to find and correct a media decision.",
+        "operationId": "list_media_api_v1_admin_media_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|approved|rejected)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Media Api V1 Admin Media Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Media",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/media/{media_id}/decision": {
+      "post": {
+        "description": "Approve or reject one photo or video after its review was decided; audited as media.approve / media.reject.",
+        "operationId": "decide_media_api_v1_admin_media__media_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Media Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaDecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Decide Media Api V1 Admin Media  Media Id  Decision Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Media",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/monitoring/summary": {
+      "get": {
+        "operationId": "monitoring_summary_api_v1_admin_monitoring_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Monitoring Summary Api V1 Admin Monitoring Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Monitoring Summary",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-deliveries": {
+      "get": {
+        "operationId": "list_deliveries_api_v1_admin_notification_deliveries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(queued|sending|accepted|delivered|bounced|failed_permanently|skipped|ambiguous)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Deliveries Api V1 Admin Notification Deliveries Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Deliveries",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-deliveries/{delivery_id}": {
+      "get": {
+        "operationId": "get_delivery_api_v1_admin_notification_deliveries__delivery_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Delivery Api V1 Admin Notification Deliveries  Delivery Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Delivery",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-deliveries/{delivery_id}/retry": {
+      "post": {
+        "description": "Send again after checking: only ambiguous or permanently failed deliveries; the attempt count goes on.",
+        "operationId": "retry_delivery_api_v1_admin_notification_deliveries__delivery_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retry Delivery Api V1 Admin Notification Deliveries  Delivery Id  Retry Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Delivery",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-outbox": {
+      "get": {
+        "operationId": "list_outbox_api_v1_admin_notification_outbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(pending|processing|processed|retry|dead_letter)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Outbox Api V1 Admin Notification Outbox Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Outbox",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-rules/{template_key}": {
+      "patch": {
+        "description": "Tune an existing catalogue rule: priority, email on/off, enabled. Events and recipients stay in code.",
+        "operationId": "update_rule_api_v1_admin_notification_rules__template_key__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Rule Api V1 Admin Notification Rules  Template Key  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Rule",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-suppressions": {
+      "get": {
+        "operationId": "list_suppressions_api_v1_admin_notification_suppressions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Active",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Suppressions Api V1 Admin Notification Suppressions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Suppressions",
+        "tags": [
+          "notification-admin"
+        ]
+      },
+      "post": {
+        "operationId": "add_suppression_api_v1_admin_notification_suppressions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuppressionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Suppression Api V1 Admin Notification Suppressions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Suppression",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-suppressions/{suppression_id}": {
+      "delete": {
+        "operationId": "remove_suppression_api_v1_admin_notification_suppressions__suppression_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suppression_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Suppression Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemovalBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove Suppression Api V1 Admin Notification Suppressions  Suppression Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Suppression",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-templates": {
+      "get": {
+        "operationId": "list_templates_api_v1_admin_notification_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Templates Api V1 Admin Notification Templates Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Templates",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-templates/{template_key}/versions": {
+      "get": {
+        "operationId": "template_versions_api_v1_admin_notification_templates__template_key__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Template Versions Api V1 Admin Notification Templates  Template Key  Versions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Template Versions",
+        "tags": [
+          "notification-admin"
+        ]
+      },
+      "post": {
+        "description": "A new draft version. Only the variables this notice allows may appear; published versions never change.",
+        "operationId": "create_template_version_api_v1_admin_notification_templates__template_key__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateDraftBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Template Version Api V1 Admin Notification Templates  Template Key  Versions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Template Version",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/notification-templates/{template_key}/versions/{version}/activate": {
+      "post": {
+        "description": "Make one version the active text; the previously active one is retired (one active per key/channel/locale).",
+        "operationId": "activate_template_version_api_v1_admin_notification_templates__template_key__versions__version__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_key",
+            "required": true,
+            "schema": {
+              "title": "Template Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Activate Template Version Api V1 Admin Notification Templates  Template Key  Versions  Version  Activate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Template Version",
+        "tags": [
+          "notification-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/queue": {
+      "get": {
+        "operationId": "queue_api_v1_admin_queue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "task_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(review_moderation|report|verification|appeal|enforcement)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Queue Api V1 Admin Queue Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reports/{report_id}/transition": {
+      "post": {
+        "operationId": "transition_report_api_v1_admin_reports__report_id__transition_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportTransitionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Transition Report Api V1 Admin Reports  Report Id  Transition Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Transition Report",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff": {
+      "get": {
+        "operationId": "list_staff_api_v1_admin_staff_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Staff Api V1 Admin Staff Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Staff",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff/{user_id}/role": {
+      "post": {
+        "description": "Grant, change or revoke a staff role. Needs a superadmin who confirmed their password in the last 10 minutes.",
+        "operationId": "change_staff_role_api_v1_admin_staff__user_id__role_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Change Staff Role Api V1 Admin Staff  User Id  Role Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Staff Role",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/submissions/{review_id}/conflict": {
+      "post": {
+        "operationId": "set_conflict_api_v1_admin_submissions__review_id__conflict_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConflictBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Conflict Api V1 Admin Submissions  Review Id  Conflict Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Conflict",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/submissions/{review_id}/media/{media_id}/url": {
+      "post": {
+        "description": "A five-minute link to a checked photo or video, so a moderator can look before deciding.",
+        "operationId": "media_url_api_v1_admin_submissions__review_id__media__media_id__url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Media Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Media Url Api V1 Admin Submissions  Review Id  Media  Media Id  Url Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Url",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/submissions/{review_id}/moderation-actions": {
+      "post": {
+        "operationId": "moderate_api_v1_admin_submissions__review_id__moderation_actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Moderate Api V1 Admin Submissions  Review Id  Moderation Actions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Moderate",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tasks/{task_id}/assign": {
+      "post": {
+        "description": "A superadmin gives a task to one staff member, or back to the shared queue with ``user_id: null``.",
+        "operationId": "assign_task_api_v1_admin_tasks__task_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Assign Task Api V1 Admin Tasks  Task Id  Assign Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assign Task",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tasks/{task_id}/claim": {
+      "post": {
+        "operationId": "claim_task_api_v1_admin_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Claim Task Api V1 Admin Tasks  Task Id  Claim Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Task",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tasks/{task_id}/escalate": {
+      "post": {
+        "operationId": "escalate_task_api_v1_admin_tasks__task_id__escalate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscalateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Escalate Task Api V1 Admin Tasks  Task Id  Escalate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Escalate Task",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tasks/{task_id}/heartbeat": {
+      "post": {
+        "operationId": "heartbeat_task_api_v1_admin_tasks__task_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Heartbeat Task Api V1 Admin Tasks  Task Id  Heartbeat Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat Task",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tasks/{task_id}/release": {
+      "post": {
+        "operationId": "release_task_api_v1_admin_tasks__task_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Release Task Api V1 Admin Tasks  Task Id  Release Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Task",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "description": "Find accounts by part of an email address, to grant a role (superadmin only, at most 10 rows).",
+        "operationId": "search_users_api_v1_admin_users_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 3,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Search Users Api V1 Admin Users Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Users",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/verification-cases/{case_id}/evidence/{evidence_id}/url": {
+      "post": {
+        "description": "A 60-second private link for the staff member holding the case. Every view is audited.",
+        "operationId": "evidence_url_api_v1_admin_verification_cases__case_id__evidence__evidence_id__url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Evidence Url Api V1 Admin Verification Cases  Case Id  Evidence  Evidence Id  Url Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evidence Url",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/verification-cases/{case_id}/transition": {
+      "post": {
+        "operationId": "verification_transition_api_v1_admin_verification_cases__case_id__transition_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationTransitionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verification Transition Api V1 Admin Verification Cases  Case Id  Transition Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verification Transition",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/appeals": {
+      "post": {
+        "operationId": "create_appeal_api_v1_appeals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Appeal Api V1 Appeals Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Appeal",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/appeals/mine": {
+      "get": {
+        "operationId": "my_appeals_api_v1_appeals_mine_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Appeals Api V1 Appeals Mine Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Appeals",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/appeals/{appeal_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_appeal_api_v1_appeals__appeal_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "appeal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Appeal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Withdraw Appeal Api V1 Appeals  Appeal Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Withdraw Appeal",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/auth/csrf": {
+      "get": {
+        "operationId": "csrf_token_api_v1_auth_csrf_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Csrf Token Api V1 Auth Csrf Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Csrf Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Login Api V1 Auth Login Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/enroll": {
+      "post": {
+        "operationId": "mfa_enroll_api_v1_auth_mfa_enroll_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mfa Enroll Api V1 Auth Mfa Enroll Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mfa Enroll",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/mfa/verify": {
+      "post": {
+        "operationId": "mfa_verify_api_v1_auth_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Mfa Verify Api V1 Auth Mfa Verify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mfa Verify",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "password_reset_confirm_api_v1_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Password Reset Confirm Api V1 Auth Password Reset Confirm Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Password Reset Confirm",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password-reset/request": {
+      "post": {
+        "operationId": "password_reset_request_api_v1_auth_password_reset_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Password Reset Request Api V1 Auth Password Reset Request Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Password Reset Request",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/reauth": {
+      "post": {
+        "description": "Confirm the password (and the TOTP code for staff) again before a high-impact action.",
+        "operationId": "reauthenticate_api_v1_auth_reauth_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reauthenticate Api V1 Auth Reauth Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reauthenticate",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Register Api V1 Auth Register Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/resend-verification": {
+      "post": {
+        "operationId": "resend_verification_api_v1_auth_resend_verification_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Resend Verification Api V1 Auth Resend Verification Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resend Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "current_session_api_v1_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Current Session Api V1 Auth Session Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Current Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "operationId": "verify_email_api_v1_auth_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Verify Email Api V1 Auth Verify Email Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/destinations": {
       "get": {
         "operationId": "list_destinations_api_v1_destinations_get",
@@ -1939,7 +5917,7 @@
     },
     "/api/v1/guest-visits": {
       "post": {
-        "description": "Count one guest visit: only a running number and the time are stored, never who.",
+        "description": "Count one guest visit-day in Redis (Guest-Identity-and-Visits 4.2). Nothing identifies the guest.\n\nThe browser sends this at most once per Dhaka day. Counting is best effort: a Redis failure is\nrecorded in ``visits_dropped`` and the response is still 204.",
         "operationId": "create_guest_visit_api_v1_guest_visits_post",
         "requestBody": {
           "content": {
@@ -1952,14 +5930,7 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GuestVisitResponse"
-                }
-              }
-            },
+          "204": {
             "description": "Successful Response"
           },
           "422": {
@@ -1974,48 +5945,6 @@
           }
         },
         "summary": "Create Guest Visit"
-      }
-    },
-    "/api/v1/guest-visits/stats": {
-      "get": {
-        "operationId": "guest_visits_stats_api_v1_guest_visits_stats_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "days",
-            "required": false,
-            "schema": {
-              "default": 30,
-              "maximum": 90,
-              "minimum": 1,
-              "title": "Days",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GuestVisitStats"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Guest Visits Stats"
       }
     },
     "/api/v1/health": {
@@ -2084,6 +6013,514 @@
           }
         },
         "summary": "Health Ready"
+      }
+    },
+    "/api/v1/notification-preferences": {
+      "get": {
+        "operationId": "get_preferences_api_v1_notification_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Preferences Api V1 Notification Preferences Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Preferences",
+        "tags": [
+          "members"
+        ]
+      },
+      "put": {
+        "operationId": "put_preferences_api_v1_notification_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferencesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Preferences Api V1 Notification Preferences Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Preferences",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "notifications_api_v1_notifications_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unread Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Notifications Api V1 Notifications Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Notifications",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/notifications/mark-all-read": {
+      "post": {
+        "operationId": "mark_all_read_api_v1_notifications_mark_all_read_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Mark All Read Api V1 Notifications Mark All Read Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mark All Read",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/notifications/stream": {
+      "get": {
+        "description": "Live notifications as Server-Sent Events: a best-effort signal, the inbox stays the source of truth\n(spec 1, 10). The connection lasts 5 minutes; `EventSource` reconnects and the page refetches.",
+        "operationId": "notification_stream_api_v1_notifications_stream_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Notification Stream",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "operationId": "unread_count_api_v1_notifications_unread_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Unread Count Api V1 Notifications Unread Count Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Unread Count",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/notifications/{notification_id}": {
+      "patch": {
+        "description": "Mark read/unread or archive/unarchive one of your own notifications. Nothing else can change.",
+        "operationId": "update_notification_api_v1_notifications__notification_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Notification Api V1 Notifications  Notification Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Notification",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/ops/jobs/visit-rollup": {
+      "post": {
+        "description": "Idempotent; called nightly by GitHub Actions and by the dashboard's \"Run roll-up\" button.",
+        "operationId": "visit_rollup_api_v1_ops_jobs_visit_rollup_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Visit Rollup Api V1 Ops Jobs Visit Rollup Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Visit Rollup",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/ops/overview": {
+      "get": {
+        "operationId": "overview_api_v1_ops_overview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Overview Api V1 Ops Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/ops/panels": {
+      "get": {
+        "operationId": "list_panels_api_v1_ops_panels_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Panels Api V1 Ops Panels Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Panels",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/ops/panels/{panel_id}": {
+      "get": {
+        "operationId": "get_one_panel_api_v1_ops_panels__panel_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "panel_id",
+            "required": true,
+            "schema": {
+              "title": "Panel Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get One Panel Api V1 Ops Panels  Panel Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get One Panel",
+        "tags": [
+          "ops"
+        ]
       }
     },
     "/api/v1/review-parameters": {
@@ -2180,6 +6617,258 @@
           }
         },
         "summary": "Create Guest Review"
+      }
+    },
+    "/api/v1/reviews/member": {
+      "post": {
+        "description": "A signed-in member's review. No Turnstile: the session, CSRF token and rate limit stand in for it.",
+        "operationId": "create_member_review_api_v1_reviews_member_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberReviewCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestReviewCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Member Review",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/media-intents": {
+      "post": {
+        "description": "Step 1 of an upload: returns a one-time signed URL for exactly one file (Review.md 8).",
+        "operationId": "media_intent_api_v1_reviews__review_id__media_intents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaIntentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaIntent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Intent",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/media/{media_id}/complete": {
+      "post": {
+        "description": "Step 2: the server checks the uploaded file and keeps a cleaned copy for the moderator.",
+        "operationId": "media_complete_api_v1_reviews__review_id__media__media_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Media Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Complete",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/media/{media_id}/remove": {
+      "post": {
+        "operationId": "media_remove_api_v1_reviews__review_id__media__media_id__remove_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Media Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Remove",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/reports": {
+      "post": {
+        "description": "A signed-in member reports a published review (API.md 4.4).",
+        "operationId": "report_review_api_v1_reviews__review_id__reports_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Report Review Api V1 Reviews  Review Id  Reports Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Review",
+        "tags": [
+          "reports"
+        ]
       }
     },
     "/api/v1/reviews/{review_id}/withdraw": {
@@ -2412,6 +7101,323 @@
           }
         },
         "summary": "Decide Review"
+      }
+    },
+    "/api/v1/verifications": {
+      "post": {
+        "operationId": "request_verification_api_v1_verifications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Request Verification Api V1 Verifications Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Verification",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/verifications/mine": {
+      "get": {
+        "operationId": "my_verification_api_v1_verifications_mine_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Verification Api V1 Verifications Mine Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Verification",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/verifications/{case_id}/evidence": {
+      "post": {
+        "description": "A one-time signed URL; the browser PUTs the file to it directly. The API never sees the bytes.",
+        "operationId": "evidence_upload_api_v1_verifications__case_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Evidence Upload Api V1 Verifications  Case Id  Evidence Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evidence Upload",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/verifications/{case_id}/evidence/{evidence_id}/complete": {
+      "post": {
+        "operationId": "evidence_complete_api_v1_verifications__case_id__evidence__evidence_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evidence_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evidence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Evidence Complete Api V1 Verifications  Case Id  Evidence  Evidence Id  Complete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evidence Complete",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/verifications/{case_id}/respond": {
+      "post": {
+        "operationId": "verification_respond_api_v1_verifications__case_id__respond_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verification Respond Api V1 Verifications  Case Id  Respond Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verification Respond",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/verifications/{case_id}/withdraw": {
+      "post": {
+        "operationId": "verification_withdraw_api_v1_verifications__case_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verification Withdraw Api V1 Verifications  Case Id  Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verification Withdraw",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/webhooks/notifications/{provider}": {
+      "post": {
+        "operationId": "provider_webhook_api_v1_webhooks_notifications__provider__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Provider Webhook",
+        "tags": [
+          "webhooks"
+        ]
       }
     }
   }

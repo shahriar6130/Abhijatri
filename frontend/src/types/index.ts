@@ -171,13 +171,32 @@ export type CategoryRatings = Partial<Record<ReviewCategory, number>>;
 
 export interface PublicReview {
   id: string;
-  guest_display_name: string | null;
+  /** A guest's typed name is never public; a guest review shows only "Anonymous guest · tag". */
+  author_type: 'GUEST' | 'MEMBER';
+  /** "1C669-J0TDY"; null for member reviews and guest reviews written before the tag existed. */
+  guest_tag: string | null;
   status: ReviewStatus;
   overall_rating: number;
   published_at: string;
   title: string;
   body: string;
   category_ratings?: CategoryRatings;
+  /** A member's public display name; null for guests. */
+  author_display_name?: string | null;
+  /** Approved photos and video only. `url` is a signed link that works for about an hour. */
+  media?: PublicMedia[];
+}
+
+export interface PublicMedia {
+  id: string;
+  kind: 'image' | 'video';
+  content_type: string;
+  url: string;
+  alt_text: string;
+  caption: string | null;
+  width: number | null;
+  height: number | null;
+  duration_ms: number | null;
 }
 
 export interface ReviewFeed {
@@ -229,18 +248,6 @@ export interface ReviewParameters {
 }
 
 /** `POST /guest-visits` (API.md 5.14). Nothing about the guest is sent or stored. */
-export interface GuestVisit {
-  visit_number: number;
-  visits_today: number;
-}
-
-export interface GuestVisitStats {
-  total_visits: number;
-  visits_today: number;
-  /** Oldest first, one entry per display-time-zone day. */
-  daily: { date: string; visits: number }[];
-}
-
 export interface GuestReviewCreate {
   destination_id: string;
   client_draft_id: string;
@@ -330,4 +337,86 @@ export interface HealthStatus {
   timestamp?: string;
   urlChecked?: string;
   error?: string;
+}
+
+/** API.md 5.17: the signed-in member as the server describes them. */
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string;
+  email_verified: boolean;
+}
+
+export type StaffRole = 'moderator' | 'superadmin';
+
+export type AuthSession =
+  | { authenticated: false }
+  | {
+      authenticated: true;
+      user: AuthUser;
+      role: StaffRole | null;
+      verified_member: boolean;
+      aal: 'aal1' | 'aal2';
+      mfa_factors: { id: string; type: string }[];
+      auth_time: string;
+    };
+
+/** API.md 5.21: one item of the notification inbox. */
+export interface AppNotification {
+  id: string;
+  kind: string;
+  /** The first part of the kind: content, account, verification, appeal, report, moderation, staff, security, notification. */
+  category?: string;
+  priority?: 'critical' | 'high' | 'normal' | 'low';
+  critical: boolean;
+  audience?: 'member' | 'staff';
+  title: { bn: string; en: string };
+  body: { bn: string; en: string };
+  link: string | null;
+  created_at: string;
+  read: boolean;
+  archived?: boolean;
+}
+
+/** API.md 5.21: how standard (non-critical) email arrives. Critical and high-priority notices are always immediate. */
+export interface NotificationPreferences {
+  standard_email_mode: 'immediate' | 'digest' | 'off';
+  digest_timezone: string;
+  digest_local_time: string;
+  always_immediate: string[];
+}
+
+export interface VerificationCaseView {
+  id: string;
+  state: 'submitted' | 'in_review' | 'needs_clarification' | 'approved' | 'rejected' | 'escalated' | 'withdrawn';
+  version: number;
+  statement: string | null;
+  decision_note: string | null;
+  decision_reason: string | null;
+  created_at: string;
+  decided_at: string | null;
+  evidence: { id: string; status: string; content_type: string }[];
+}
+
+export interface AppealView {
+  id: string;
+  reference: string;
+  state: 'received' | 'in_review' | 'upheld' | 'overturned' | 'withdrawn';
+  target_type: string | null;
+  target_id: string | null;
+  reason: string;
+  submitted_at: string;
+  deadline_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+}
+
+export interface AppealableDecision {
+  target_type: 'moderation_action' | 'enforcement_case' | 'verification_case';
+  target_id: string;
+  label: string;
+  decided_at: string;
+  deadline_at: string;
+  open: boolean;
+  appeal_state: string | null;
 }

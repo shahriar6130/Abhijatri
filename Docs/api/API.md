@@ -35,12 +35,12 @@
 | None | Public reads, health | Nothing. Public `GET` routes are CORS simple requests: no custom headers, no credentials. |
 | Guest scope secret | Guest submission | `guest_scope_secret` in the body. Supplemental signal only, not an abuse boundary (PF 14.1). |
 | Guest receipt | Receipt operations | `receipt_secret` in the body (Section 5.1). |
-| Member session | Member endpoints | Cookie `__Host-abhijatri_session` (`SameSite=Lax`) plus `X-CSRF-Token` on writes. |
-| Staff session | `/staff/*` | Cookie `__Host-abhijatri_staff_session` (`SameSite=Strict`) plus `X-CSRF-Token` on writes. Member sessions never authorise staff routes and staff sessions never authorise member routes. |
+| Member session | Member endpoints | Cookie `__Host-abhijatri_session` (the Supabase access token, `HttpOnly`, `SameSite=Lax`) with `__Host-abhijatri_refresh` (the refresh token); `X-CSRF-Token` on writes. Implemented 27 Oct 2026. |
+| Staff session | `/admin/*` (replaces `/staff/*`) | The same session cookies. Staff are members who hold an active row in `user_roles` and have passed TOTP (`aal2`). The role is read from the database on every request, never from the token. Non-staff get `404`, staff of the wrong role `403`. |
 
-Both cookies are host-only on `api.<owned-domain>`, `Secure`, `HttpOnly`, `Path=/`, with no `Domain` attribute (PF 5.3). No receipt cookie exists.
+Identity is provided by Supabase Auth (decision of 27 Oct 2026, deviating from PF 8.1); the browser still talks only to this API, which proxies Auth and keeps the tokens in cookies. The cookies are host-only, `Secure`, `HttpOnly`, `Path=/`, with no `Domain` attribute (PF 5.3). No receipt cookie exists. Cookie sessions across different sites (for example Vercel and Railway) need the owned same-site domain (PF 5.5).
 
-Until the staff authentication adapter lands (R04), staff routes accept the development-only `X-Test-Staff-Id` header when `APP_ENV` is `development` or `test`, and return `501 STAFF_AUTH_NOT_CONFIGURED` in production.
+The development-only `X-Test-Staff-Id` header remains for the old `/staff/moderation/*` routes while `APP_ENV` is `development` or `test`; they return `501 STAFF_AUTH_NOT_CONFIGURED` in production and are replaced by `/admin/*`.
 
 ### 1.2 CORS and CSRF
 
@@ -74,6 +74,11 @@ Every error, including validation errors, uses one shape (PF 12.3). FastAPI's de
 | HTTP | `code` | When |
 |---|---|---|
 | 401 | `AUTH_REQUIRED` | Missing or invalid session. |
+| 401 | `INVALID_CREDENTIALS` | Wrong email or password, or a wrong TOTP code. Never says which. |
+| 403 | `EMAIL_NOT_VERIFIED` | Correct password, address not yet verified. |
+| 403 | `ACCOUNT_DISABLED` | The account has been disabled. |
+| 403 | `MFA_REQUIRED` | A staff action needs a session that passed TOTP (`aal2`). |
+| 403 | `REAUTH_REQUIRED` | A high-impact action needs a password check within the last 10 minutes. |
 | 403 | `FORBIDDEN` | Authenticated but not permitted. |
 | 403 | `SELF_MODERATION_FORBIDDEN` | A moderator acts on their own review. |
 | 403 | `CSRF_INVALID` | Missing or wrong `X-CSRF-Token`. |
@@ -83,18 +88,21 @@ Every error, including validation errors, uses one shape (PF 12.3). FastAPI's de
 | 409 | `REVIEW_VERSION_CONFLICT` | `expected_version` is stale. |
 | 409 | `INVALID_TRANSITION` | The decision is not allowed from the current state. |
 | 409 | `DRAFT_ALREADY_SUBMITTED` | Duplicate draft with a different receipt (Section 5.2). |
+| 409 | `MEMBER_REVIEW_EXISTS` | A member already has an active review of that destination for that visit month (Section 5.20). |
 | 409 | `RESERVED_DISPLAY_NAME` | Display name is reserved (for example `Admin`, `Moderator`). |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | Same `Idempotency-Key` with a different request body. |
 | 409 | `DUPLICATE_OPEN_REPORT` | The same scope already has an open report on this review. |
 | 409 | `APPEAL_WINDOW_CLOSED` | Appeal sent after the 30-day window. |
 | 413 | `PAYLOAD_TOO_LARGE` | Request body exceeds the configured limit. |
+| 422 | `TOKEN_INVALID_OR_EXPIRED` | An email verification or password-reset link is wrong, used or expired. |
 | 422 | `VALIDATION_FAILED` | Schema validation failed; see `field_errors`. |
 | 422 | `INVALID_CURSOR` | `after` cannot be decoded. |
 | 422 | `INVALID_RECEIPT_FORMAT` | Receipt is not `abr1_` plus 43 base64url characters, or is a known weak value. |
 | 429 | `RATE_LIMITED` | A limit in Section 7 was hit. `Retry-After` is set. |
 | 503 | `GUEST_WRITES_PAUSED` | Pending ceiling reached or emergency switch on (PF 14.3, 14.6). Public reads continue. |
 | 500 | `INTERNAL_ERROR` | Unexpected failure. |
-| 501 | `STAFF_AUTH_NOT_CONFIGURED` | Staff route in production before R04. |
+| 501 | `AUTH_NOT_CONFIGURED` | The Supabase settings are missing, so no sign-in route works. |
+| 501 | `STAFF_AUTH_NOT_CONFIGURED` | Old `/staff/*` route in production (replaced by `/admin/*`). |
 | 503 | `SERVICE_UNAVAILABLE` | Database unavailable or pool exhausted. `Retry-After` is set. |
 | 504 | `REQUEST_TIMEOUT` | Request exceeded the server timeout. |
 
@@ -115,9 +123,13 @@ Retryable writes accept `Idempotency-Key: <UUID>` (PF 12.4).
 |---|---|---|---|
 | `GET /health` (also `HEAD`) | none | no-store | Implemented |
 | `GET /health/ready` (also `HEAD`) | none | no-store | Change required |
-| `GET /auth/csrf` | member or staff session | no-store | Planned (R04) |
-| `POST /guest-visits` | none (empty body, no cookie, no name) | no-store | Implemented 20 Oct 2026; count-only since migration 0008 (section 5.14) |
-| `GET /guest-visits/stats` | none | Public, short TTL | Implemented 20 Oct 2026 (section 5.14) |
+| `GET /auth/csrf` | member or staff session | no-store | Implemented 27 Oct 2026 (section 5.17) |
+| `POST /guest-visits` | none (body `{ "first_visit": bool }` only, no cookie) | no-store | Implemented; Redis day counters since 22 Oct 2026 (section 5.14) |
+| `GET /guest-visits/stats` | — | — | **Removed 22 Oct 2026**: traffic volume is not public; the numbers moved to `GET /ops/overview` (5.16) |
+| `GET /ops/panels` | ops token (`Authorization: Bearer`) | no-store | Implemented 22 Oct 2026 (section 5.16) |
+| `GET /ops/panels/{panel_id}` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
+| `GET /ops/overview` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
+| `POST /ops/jobs/visit-rollup` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
 
 `/health` returns `{ "status": "ok" }`. `/health/ready` checks the database and returns `503 SERVICE_UNAVAILABLE` if it is down. It must also report the deployed build and the database migration revision, because the deploy workflow polls it for both (PF 22.1):
 
@@ -159,7 +171,7 @@ Public responses vary by `Accept-Language` and are purged on moderation or delet
 
 | Method and path | Credential | Cache | Status |
 |---|---|---|---|
-| `POST /auth/register`, `/auth/verify-email`, `/auth/login`, `/auth/logout`, `/auth/password-reset/request`, `/auth/password-reset/confirm` | none or member | no-store | Planned (R04). Shapes are set by `Features/Identity-Access-Verification.md`. |
+| `POST /auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/logout`, `/auth/password-reset/request`, `/auth/password-reset/confirm`, `GET /auth/session`, `POST /auth/mfa/enroll`, `/auth/mfa/verify`, `/auth/reauth` | none or member | no-store | Implemented 27 Oct 2026 (R04, section 5.17) |
 | `POST /reviews/member` | member | no-store | Planned (R07) |
 | `GET /reviews/{review_id}` | owner or staff | no-store | Planned (R07) |
 | `POST /verifications` | member | no-store | Planned (R04) |
@@ -336,7 +348,8 @@ Query: `after` (optional cursor, at most 200 characters), `limit` (1 to 50, defa
   "items": [
     {
       "id": "...",
-      "guest_display_name": "Sadia Rahman",
+      "author_type": "GUEST",
+      "guest_tag": "1C669-J0TDY",
       "status": "PUBLISHED",
       "overall_rating": 4,
       "published_at": "2026-10-15T08:30:00Z",
@@ -355,7 +368,7 @@ Query: `after` (optional cursor, at most 200 characters), `limit` (1 to 50, defa
 }
 ```
 
-`category_ratings` is `{}` when the reviewer rated no category. `guest_category_averages` lists only categories with at least one counted rating, in the Section 8 order, each with its own count.
+**The guest's typed name is never in the public feed** (owner, 22 Oct 2026): `author_type` is `GUEST` or `MEMBER`, and a guest review is shown only as "Anonymous guest · tag". Moderators still see `guest_display_name` in `GET /staff/moderation/reviews`. `guest_tag` is the guest's public pseudonym, computed by the server from the scope secret (Guest-Identity-and-Visits 3.1). Clients show it as "Anonymous guest · 1C669-J0TDY" (বেনামী অতিথি). It is `null` for member reviews and for guest reviews written before 22 Oct 2026. `category_ratings` is `{}` when the reviewer rated no category. `guest_category_averages` lists only categories with at least one counted rating, in the Section 8 order, each with its own count.
 
 Only `PUBLISHED` reviews appear. Guest ratings feed Guest Feedback only, never Community Rating (RV 6.2). The response carries a short public `Cache-Control` TTL (Security 7.1), not `no-store`.
 
@@ -524,47 +537,27 @@ Rules:
   - `seeded_selection` is `true` while the score is `null`. The client then shows "Seeded Destination Selection" instead of a score (RV 6.4).
   - Clients display these values and never compute the rating themselves.
 
-### 5.14 `POST /guest-visits` and `GET /guest-visits/stats`
+### 5.14 `POST /guest-visits`
 
-This is the **guest footprint**: how many guests come to the site each day, **never who** (scope owner, 20 Oct 2026). The guest's name stays on their device for the welcome "Welcome, <name> · Guest #N" (Review.md 3.2 step 1).
+Counts one visitor-day (Guest-Identity-and-Visits 4.2). Nothing identifies the guest; the guest tag, name and scope secret never reach this route.
 
 ```http
 POST /api/v1/guest-visits
 Content-Type: application/json
 
-{}
+{ "first_visit": true }
 ```
 
-Response `200`:
+Response `204 No Content`, `Cache-Control: no-store`.
 
-```json
-{ "visit_number": 128, "visits_today": 9 }
-```
+- **The body is exactly one boolean.** Any other field (name, tag, secret, device id) returns `422 UNKNOWN_FIELD`; a missing `first_visit` returns `422 REQUIRED`.
+- **What is stored:** one `HINCRBY` on the Redis hash `abj:{APP_ENV}:visits:{YYYY-MM-DD}` (field `guest_new` or `guest_returning`, TTL 8 days). Finished days are rolled up into `visit_daily_stats` (four integers per day). No server row per visit or per guest exists.
+- **Once per Asia/Dhaka day per browser.** The client sends nothing when `abhijatri_last_visit_on` is today. `first_visit` is `true` only when the browser has never been counted.
+- **Best effort.** If Redis is slow or down the route still returns `204`; the miss is counted as `visits_dropped` and shown on the ops dashboard. `VISIT_COUNTER_ENABLED=false` stops counting.
+- **Limits.** Burst `RATE_LIMIT_GUEST_VISIT` (default `20/minute`), then the durable `GUEST_VISITS_PER_NETWORK_PER_HOUR` (default 60) returning `429 RATE_LIMITED` with `Retry-After`.
+- The response carries no number, so traffic volume is not public.
 
-- **The body is always empty.** Any field (a `name`, the old `guest_scope_secret`, a device id) returns `422 UNKNOWN_FIELD`.
-- **What is stored:** exactly one row in `guest_visits` with two columns, `id` (the running number) and `visited_at`. Nothing else: no name, device id, hash, address or user reference.
-- **One visit per guest per day.** The client calls this at most once per Asia/Dhaka calendar day per browser (it remembers the date locally). It keeps the `visit_number` of its first visit as "Guest #N" and reuses it on later days. A new browser, an incognito window or cleared storage counts as a new guest.
-- **Limits.** The in-memory burst limit `RATE_LIMIT_GUEST_VISIT` (default `20/minute`) applies, then a durable `GUEST_VISITS_PER_NETWORK_PER_HOUR` (default 60), which returns `429 RATE_LIMITED` with `Retry-After`. Those counters live in `rate_limit_buckets`, the platform's general abuse control keyed by a network digest and purged within 2 days. They are not guest data.
-- **Caching:** `Cache-Control: no-store`. No cookie or CSRF token is used.
-
-`GET /api/v1/guest-visits/stats?days=30` (`days` 1 to 90) returns the daily footprint:
-
-```json
-{
-  "total_visits": 128,
-  "visits_today": 9,
-  "daily": [{ "date": "2026-10-19", "visits": 14 }, { "date": "2026-10-20", "visits": 9 }]
-}
-```
-
-`daily` lists the last `days` Asia/Dhaka days, oldest first, with days that had no visits shown as 0. The response is public with a short TTL (Security 7.1).
-
-**Client flow** (`frontend/src/api/guests.ts`, `recordDailyVisit`):
-1. The guest enters a name on `/guest`, and it is saved locally.
-2. If this browser has not been counted today, it calls `POST /guest-visits` with `{}`.
-3. It stores today's date and, on the first visit only, the `visit_number`.
-4. It shows "Welcome, <name> · Guest #N".
-5. If the call fails, the welcome still shows the name with any number already stored.
+**Client flow** (`frontend/src/api/guests.ts`, `recordDailyVisit`): on every app load, if this browser was not counted today, send `{ "first_visit": <no abhijatri_first_visit_on yet> }`, then store today in `abhijatri_last_visit_on` (and `abhijatri_first_visit_on` the first time).
 
 ### 5.15 `GET /review-parameters`
 
@@ -602,6 +595,155 @@ This route returns the review form and the rating rules, so the client renders t
 - **Category averages** are computed per audience and never merged.
 - The overall rating is never derived from the category ratings.
 
+### 5.16 Operations API: `/ops/*` (System Monitoring Dashboard)
+
+Private, read-only API for the ops dashboard (`Docs/System-Monitoring-Dashboard.md` 3 to 6).
+
+- **Credential:** `Authorization: Bearer <OPS_DASHBOARD_TOKEN>` only (never a URL, cookie or log). When the variable is unset every `/ops` route is `404`. A wrong or missing token is `401 AUTH_REQUIRED`; after 10 failures per network per hour the network gets `429 RATE_LIMITED`.
+- **Caching:** every response is `no-store`. Burst limit 60 requests per minute.
+- **Content:** aggregates and system state only. No names, guest tags, secrets, receipts, IP addresses, emails or review bodies.
+
+| Route | Returns |
+|---|---|
+| `GET /ops/panels` | `{ "panels": [{ id, title {bn,en}, version, refresh_seconds, permission, sources, owner }] }` |
+| `GET /ops/panels/{panel_id}?days=7\|30\|90` | One panel (shape below); unknown id is `404` |
+| `GET /ops/overview?days=7\|30\|90` | `{ generated_at, days, panels: [...] }`. First rolls up any missing finished day (best effort). |
+| `POST /ops/jobs/visit-rollup` | `{ "rolled_up": ["2026-10-21"] }`. Idempotent; `503` when Redis is not reachable. |
+
+Panel shape (dashboard doc 6.2): `{ id, version, title, status: ok|degraded|unavailable, generated_at, refresh_seconds, sources: [{name, fresh_at}], blocks: [...], notes: [{bn,en}] }`. Block types are `stat` (`value`, optional `limit`, `level`, `hint`), `series` (`points: [{date, value}]`, `null` = no data), `table` (`columns`, `rows`) and `status` (`value`, `level`). A missing number is `null`, never `0`.
+
+Panels: `visitors`, `content`, `reviews`, `traffic`, `health`, `members`.
+
+### 5.17 Authentication: `/auth/*` (R04, implemented 27 October 2026)
+
+All responses are `no-store`. Identity is Supabase Auth, proxied by this API; no body ever contains a token. A write from a browser must carry an allowed `Origin`. Cookie-authenticated writes also need `X-CSRF-Token` from `GET /auth/csrf`.
+
+| Route | Request body | Response |
+|---|---|---|
+| `POST /auth/register` | `{ email, password, display_name, turnstile_token? }`; password at least 10 characters with a letter and a digit; display name 1 to 80 characters, not reserved | `202 { "status": "verification_sent" }`, identical for new and existing addresses. `409 RESERVED_DISPLAY_NAME`, `422 VALIDATION_FAILED` |
+| `POST /auth/verify-email` | `{ token_hash }` from the emailed link | `200 { "status": "verified" }`; no session is created. `422 TOKEN_INVALID_OR_EXPIRED` |
+| `POST /auth/resend-verification` | `{ email }` | `202`, identical for any address |
+| `POST /auth/login` | `{ email, password }` | `200` session payload (below) and the two cookies. `401 INVALID_CREDENTIALS`, `403 EMAIL_NOT_VERIFIED`, `403 ACCOUNT_DISABLED`, `429` |
+| `POST /auth/logout` | none; needs `X-CSRF-Token` | `204`; cookies cleared and the Auth session revoked |
+| `POST /auth/password-reset/request` | `{ email, turnstile_token? }` | `202 { "status": "reset_sent" }`, identical for any address |
+| `POST /auth/password-reset/confirm` | `{ token_hash, new_password }` | `200 { "status": "password_changed" }`; every session of the account ends. The password is checked before the one-time link is spent |
+| `GET /auth/csrf` | none | `{ "csrf_token": "..." }` bound to the session |
+| `GET /auth/session` | none | `{ "authenticated": false }` or the session payload. Counts the member's visit day once per Dhaka day |
+| `POST /auth/mfa/enroll` | none (CSRF) | `{ factor_id, secret, uri, qr_code }` for an authenticator app |
+| `POST /auth/mfa/verify` | `{ factor_id, code }` (6 digits, CSRF) | `{ aal: "aal2", auth_time, csrf_token }` and new cookies |
+| `POST /auth/reauth` | `{ password, code? }` (CSRF); `code` required when TOTP is enrolled | `{ aal, auth_time, csrf_token }` and new cookies |
+
+Session payload: `{ authenticated: true, user: { id, email, display_name, email_verified }, role: null | "moderator" | "superadmin", aal: "aal1" | "aal2", mfa_factors: [{ id, type }], auth_time }`. Cookies: `__Host-abhijatri_session` (access token, lifetime of the token) and `__Host-abhijatri_refresh` (30 days), both `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
+
+### 5.18 Staff API: `/admin/*` (Moderation spec 8, Gantt R10 and R11; implemented 27 October 2026)
+
+Needs a member session that holds an active staff role (`user_roles`, read from the database on every request) and passed TOTP (`aal2`). Everyone else gets `404`; a role that is too low gets `403`. All responses are `no-store`; writes need `X-CSRF-Token`. Decisions accept an `Idempotency-Key` (8 to 100 characters of letters, digits, `-`, `_`): the same key and payload returns the first result, the same key with another payload is `409 IDEMPOTENCY_KEY_REUSED`.
+
+| Route | Who | Body and result |
+|---|---|---|
+| `GET /admin/queue?task_type=&limit=` | staff | `{ items: [{ id, task_type, subject_id, status, required_role, escalated, claimed_by, lease_expires_at, version, claimable, lease_active, lease_token (holder only), subject }], generated_at }`, oldest and highest priority first. `subject` carries the review or report content. |
+| `POST /admin/tasks/{task_id}/claim` | staff | The task with `lease_token`. `409 TASK_NOT_AVAILABLE` while another live lease exists; `403` when escalated above the caller. A lease lasts 5 minutes; an expired one can be taken over. |
+| `POST /admin/tasks/{task_id}/heartbeat` and `POST /admin/tasks/{task_id}/release` | holder | `{ lease_token }`. `409 LEASE_LOST` when the lease expired or moved. |
+| `POST /admin/tasks/{task_id}/escalate` | holder | `{ lease_token, reason }`. The task now needs a superadmin and the holder's lease ends. |
+| `POST /admin/submissions/{review_id}/moderation-actions` | staff | `{ task_id, lease_token, expected_version, decision: PUBLISH\|REJECT\|HIDE\|RESTORE, reason_code, note? }` -> `{ review_id, status, version, counted_rating, task_id }`. Order: role, lease, state and version, action row, audit row, event, one commit. `409 REVIEW_VERSION_CONFLICT`, `409 LEASE_LOST`, `422 TRANSITION_NOT_ALLOWED`, `403 SELF_MODERATION_FORBIDDEN`. |
+| `POST /admin/submissions/{review_id}/conflict` | staff | `{ expected_version, conflict_declared, reason_code, note? }` |
+| `POST /admin/bulk/moderation-actions` | staff | `{ items: [{ review_id, ...decision body }] }` (at most 25). Each item is atomic; the answer lists `{ review_id, ok, result \| error }` per item plus `succeeded` and `failed`. |
+| `POST /admin/reports/{report_id}/transition` | staff | `{ to: in_review\|actioned\|dismissed, expected_version, reason_code, note?, task_id, lease_token }`. Allowed: `open` -> `in_review`, `actioned`, `dismissed`; `in_review` -> `actioned`, `dismissed`. Anything else is `422 TRANSITION_NOT_ALLOWED`. |
+| `GET /admin/audit-events?action=&target_type=&target_id=&actor_user_id=&before=&limit=` | staff | Newest first, `{ items, next_before }` |
+| `GET /admin/audit-events/{event_id}` | staff | One event; `id` is globally unique |
+| `GET /admin/staff` | superadmin | Active staff and roles |
+| `GET /admin/users?q=` | superadmin | `{ items: [{ user_id, display_name, email, status, role }] }`: accounts whose email contains `q` (3 or more characters, at most 10 rows), to pick someone for a role |
+| `POST /admin/staff/{user_id}/role` | superadmin, password confirmed within 10 minutes | `{ role: moderator\|superadmin\|null, reason }`. Serialised on a guard row; `409 LAST_SUPERADMIN` when it would remove the last superadmin; `403 REAUTH_REQUIRED` when the confirmation is old. |
+| `GET /admin/monitoring/summary` | staff | `{ queue_depth, oldest_open_task_age_seconds, escalated_open, expired_claims, open_reports, outbox_pending, denied_last_24h, generated_at }` |
+| `POST /reviews/{review_id}/reports` | member (CSRF) | `{ reason_code: spam\|offensive\|false_information\|privacy\|conflict_of_interest\|other, details? }` -> `201 { report_id, state, version }`. Only published reviews can be reported (`404` otherwise); `409 DUPLICATE_OPEN_REPORT`; `403` for your own review. |
+
+Denied attempts by staff (`403`) are written to the audit log as `denied.<action>`.
+
+### 5.19 Verification, enforcement, appeals and notifications (implemented 27 October 2026)
+
+Member routes need a session (writes: CSRF). Staff routes follow 5.18 (404 for non-staff, 403 for a lower role, lease and version checks, audit and outbox in one transaction).
+
+| Route | Who | Body and result |
+|---|---|---|
+| `GET /verifications/mine` | member | `{ verified_member, case: { id, state, version, statement, decision_note, evidence: [{id, status, content_type}] } \| null }` |
+| `POST /verifications` | member | `{ statement? }` -> `201` case. `409 VERIFICATION_ALREADY_OPEN`, `409 ALREADY_VERIFIED`, `403 ACCOUNT_RESTRICTED` |
+| `POST /verifications/{case_id}/evidence` | applicant | `{ content_type: image/jpeg\|image/png\|application/pdf, size_bytes <= 5 MB }` -> `{ evidence_id, upload_url }`; the browser `PUT`s the file to `upload_url` (one-time, private bucket). At most 3 files |
+| `POST /verifications/{case_id}/evidence/{evidence_id}/complete` | applicant | Confirms the file is in Storage -> `{ id, status: "uploaded" }`; `422` if it is not there |
+| `POST /verifications/{case_id}/respond` | applicant | `{ statement }` while `needs_clarification` -> back to `in_review` and the queue |
+| `POST /verifications/{case_id}/withdraw` | applicant | Withdraws an open case |
+| `POST /admin/verification-cases/{case_id}/transition` | staff holding the task | `{ to: in_review\|needs_clarification\|approved\|rejected\|escalated, expected_version, reason_code, note?, task_id, lease_token }`. Approval needs an uploaded file (`422 EVIDENCE_REQUIRED`); a question needs `note`; escalated cases are decided by a superadmin. Nobody decides their own case |
+| `POST /admin/verification-cases/{case_id}/evidence/{evidence_id}/url` | the staff member holding the case, or a superadmin | `{ url, expires_in: 60 }`; every view is audited as `evidence.viewed` |
+| `GET /admin/enforcement-cases?state=` | staff | Cases with their review or account and sanctions |
+| `POST /admin/enforcement-cases` | staff | `{ review_id \| user_id, reason_code, note?, emergency, counts_toward_rating, sanction?: { kind: warning\|posting_restriction\|suspension, ends_at? , review_on? } }` -> `201`. A review is taken down (hidden); an emergency gets a superadmin follow-up within 24 h; a suspension needs a superadmin and disables the account while active |
+| `POST /admin/enforcement-cases/{case_id}/actions` | staff (emergency: superadmin) | `{ action: remove\|restore\|close\|reverse_sanction, expected_version, reason_code, note?, counts_toward_rating?, sanction_id? }` |
+| `GET /appeals/mine` | member | `{ appeals: [...], appealable: [{ target_type, target_id, label, decided_at, deadline_at, open, appeal_state }] }` |
+| `POST /appeals` | member with standing | `{ target_type: moderation_action\|enforcement_case\|verification_case, target_id, reason }` -> `201`. Deadline: end of the 30th day after the decision, Asia/Dhaka (`409 APPEAL_WINDOW_CLOSED`); one appeal per decision (`409 DUPLICATE_APPEAL`, also after a decision; a withdrawn appeal may be filed again) |
+| `POST /appeals/{appeal_id}/withdraw` | appellant | While `received` or `in_review` |
+| `POST /admin/appeals/{appeal_id}/decision` | staff holding the task, not the original decider | `{ outcome: upheld\|overturned, expected_version, note, task_id, lease_token }`; `403 APPEAL_REVIEWER_NOT_INDEPENDENT`. Overturning restores a hidden review, sends a rejected review back to the queue, grants a rejected verification, or reverses an enforcement and its sanctions. The original decision is kept |
+| Notifications | member | Moved to section 5.21 (Notification system v1.1). |
+
+### 5.20 Member reviews with photos and videos (implemented 27 October 2026)
+
+Owner decisions, 27 Oct 2026: any signed-in member (confirmed email) may attach media, not only Verified Members; video follows Review.md amendment A4 **without transcoding**. Guests stay text-only. Member routes need a session and the CSRF token.
+
+| Route | Who | Body and result |
+|---|---|---|
+| `POST /reviews/member` | member (CSRF), 20/hour | The 5.2 body without `guest_scope_secret`, `guest_display_name` and `turnstile_token`. The author and public name come from the session. `201 { review_id, status, version, duplicate_recovered }`; the same `client_draft_id` and receipt return `200` with `duplicate_recovered: true`. `409 MEMBER_REVIEW_EXISTS` for a second active review of the same destination and visit month |
+| `POST /reviews/{review_id}/media-intents` | the author, while the review is `PENDING`, 30/hour | `{ content_type: image/jpeg\|image/png\|image/webp\|video/mp4, size_bytes, alt_text (1-250), caption? (<=300), ownership_declared: true }` -> `201 { media_id, kind, upload_url, max_bytes }`. The browser `PUT`s the file to `upload_url` (one-time, private bucket `review-media`, `quarantine/`). At most 5 images (8 MiB each) and 1 video (50 MiB); field errors `TYPE`, `TOO_LARGE`, `TOO_MANY`. Someone else's review is `404`; after the moderator's decision `422 TRANSITION_NOT_ALLOWED` |
+| `POST /reviews/{review_id}/media/{media_id}/complete` | the author | The server reads the object: images must really be JPEG, PNG or WebP of at most 20 megapixels and are re-encoded to WebP (long edge <= 2048 px) with no EXIF/GPS; videos must be MP4 with H.264 video, AAC audio and at most 60 s, and their metadata boxes and extra tracks are blanked in place (no transcoding). `200 { id, kind, state: "pending", content_type, width, height, duration_ms, size_bytes }`. A bad file is deleted and answers `422` with field `file` and code `BROKEN`, `TYPE`, `TOO_MANY_PIXELS`, `TOO_LARGE`, `TOO_LONG`, `VIDEO_CODEC` or `NOT_UPLOADED` |
+| `POST /reviews/{review_id}/media/{media_id}/remove` | the author, while `PENDING` | `204`; deletes the objects and frees the place |
+| `POST /admin/submissions/{review_id}/media/{media_id}/url` | staff | `{ url, expires_in: 300 }` for the checked copy, to look before deciding |
+| `GET /admin/media?state=pending\|approved\|rejected&limit=` | staff | Recent media with `review_id`, `review_status`, `destination_id`, `decided_at` |
+| `POST /admin/media/{media_id}/decision` | staff | `{ decision: approve\|reject, reason_code }`: corrects a decision made with the review (`422 TRANSITION_NOT_ALLOWED` for pending or removed media). Audited as `media.approve` / `media.reject` with `from` and `to` |
+
+Moderation: the queue item of a review lists its pending media (`subject.media`). `POST /admin/submissions/{review_id}/moderation-actions` accepts `rejected_media_ids` (PUBLISH only): those are rejected and the rest approved; REJECT rejects all. The decision, the media states and the audit record (`metadata.media`) commit together. The public feed (5.8) adds `author_display_name` for member reviews and `media: [{ id, kind, content_type, url, alt_text, caption, width, height, duration_ms }]` with approved media only; `url` is a signed link valid for one hour. Uploads not completed within 24 hours are purged by the retention job.
+
+### 5.21 Notification system v1.1 (implemented 28 October 2026)
+
+Implements `Docs/Notification-Documentation.md`. Member routes need a session (writes: CSRF). Superadmin routes follow 5.18 (404 for non-staff, 403 for moderators, TOTP) and every write is audited. Responses never contain an email address, subject or message body of an email; deliveries show only a prefix of the address HMAC.
+
+**Member inbox**
+
+| Route | Body and result |
+|---|---|
+| `GET /notifications?limit=1..50&cursor=&archived=false&unread_only=false` | `{ items: [{ id, kind, category, priority, critical, audience, title {bn,en}, body {bn,en}, link, created_at, read, archived }], next_cursor, unread }`, newest first. `422 INVALID_CURSOR`. Staff notices (`audience: staff`) appear only while the person holds a staff role. |
+| `GET /notifications/unread-count` | `{ unread }` (archived items are not counted) |
+| `PATCH /notifications/{notification_id}` | `{ read?: bool, archived?: bool }` on your own item only (`404` otherwise; any other field `422`) → the item plus `unread` |
+| `POST /notifications/mark-all-read` | `{ unread: 0 }` |
+| `GET /notification-preferences` | `{ standard_email_mode: immediate\|digest\|off, digest_timezone, digest_local_time: "HH:MM", always_immediate: ["critical","high"] }`; default `digest`, `Asia/Dhaka`, `08:00` |
+| `PUT /notification-preferences` | Same three fields; the zone must be an IANA name. Critical and high-priority notices are always emailed at once and cannot be switched off. |
+| `GET /notifications/stream` | Server-Sent Events: `unread` on connect, then `notification` events. Best effort only: the inbox above is the source of truth, and the page refetches after a reconnect. |
+
+**Superadmin monitoring and templates**
+
+| Route | Body and result |
+|---|---|
+| `GET /admin/notification-deliveries?status=&limit=` | `{ items: [{ id, notification_id, digest_id, kind, channel, status, attempt_count, next_attempt_at, provider, destination_ref, last_error_code, created_at, updated_at }], counts }` |
+| `GET /admin/notification-deliveries/{delivery_id}` | The delivery plus `provider_message_id`, `last_error_summary` (redacted) and `attempts: [{ attempt_number, outcome, started_at, finished_at, error_class, error_code, redacted_error_summary }]` |
+| `POST /admin/notification-deliveries/{delivery_id}/retry` | `{ reason }`; only `ambiguous` or `failed_permanently` (`422 TRANSITION_NOT_ALLOWED` otherwise). Audited `notification.delivery_retried`. |
+| `GET /admin/notification-outbox?status=pending\|processing\|processed\|retry\|dead_letter&limit=` | `{ items: [{ id, event_type, aggregate_type, aggregate_id, status, attempts, next_attempt_at, last_error_code, created_at, processed_at }], counts, oldest_unprocessed_at }` |
+| `GET /admin/notification-suppressions?active=true` | Suppressions with an HMAC prefix, never the address |
+| `POST /admin/notification-suppressions` | `{ email, channel: "email", reason_code }` → `201`; `422 ALREADY_SUPPRESSED` field code. Audited. |
+| `DELETE /admin/notification-suppressions/{suppression_id}` | `{ removal_reason }` → the removed row. Audited. |
+| `GET /admin/notification-templates` | Every template key with its allowed variables, audience, live priority/email/enabled and active versions |
+| `GET /admin/notification-templates/{template_key}/versions` | All versions of every channel and language |
+| `POST /admin/notification-templates/{template_key}/versions` | `{ channel: in_app\|email, locale: bn\|en, subject_template?, title_template?, body_template }` → `201` draft with the next version number. Only the key's allowed `{variables}` (`UNKNOWN_VARIABLE`, `BAD_PLACEHOLDER`). Audited. |
+| `POST /admin/notification-templates/{template_key}/versions/{version}/activate` | `{ channel, locale }`: the version becomes active and the previous active one is retired (one active per key/channel/locale; a retired version cannot come back, `422`). Audited. |
+| `PATCH /admin/notification-rules/{template_key}` | `{ priority?, email?, enabled? }` for an existing catalogue rule only (`404` otherwise). Audited. |
+| `POST /admin/tasks/{task_id}/assign` | Superadmin: `{ user_id: uuid \| null }`. Notifies the assignee (task or appeal assigned) and the previous assignee (unassigned). Audited. |
+
+**Provider webhook (no session; provider authentication instead)**
+
+`POST /webhooks/notifications/{provider}` (`resend` or `brevo`): Resend uses the Svix signature (`svix-id`, `svix-timestamp`, `svix-signature`, secret `RESEND_WEBHOOK_SECRET`); Brevo sends `Authorization: Bearer <BREVO_WEBHOOK_TOKEN>`. A timestamp outside 5 minutes, a wrong signature or a non-JSON body is refused (`403`/`422`) and counted for the anomaly alert; a provider without a configured secret is `404`. Each `(provider, provider_event_id)` is processed once (`{ status: "processed" | "duplicate" }`). Delivered marks the delivery `delivered`; a hard bounce marks it `bounced` and suppresses the address; a complaint suppresses it.
+
+**Behaviour**
+
+- Producers write `outbox_events` in the business transaction (`app/notify/events.py`, unique `dedupe_key`, captured staff recipients and the recipient policy). The worker claims with `FOR UPDATE SKIP LOCKED` and a lease, creates one notification per event, recipient and kind, and retries a failing event with backoff until `dead_letter` (6 tries).
+- The catalogue (`app/notify/registry.py`) maps events to the kinds of spec section 3. Staff captured at event time are re-checked against their current role; the person whose role is revoked is still told (as a member notice).
+- Email: critical and high-priority items at once, others by preference (immediate, daily digest at the person's local time, or off). The current verified address is read at send time; unverified or suppressed addresses are `skipped`. Retries after about 1 min, 5 min, 30 min and 2 h with jitter, then `failed_permanently`; a timeout is `ambiguous` and never resent automatically; a worker that dies mid-send leaves `ambiguous` (lease reconciliation). Every try has an attempt row.
+- Alerts (deduplicated per window, also logged at ERROR): lease expiring (holder), queue overdue (moderators, daily), escalation, repeated denials, delivery failures (5/hour), outbox backlog (older than 10 minutes), webhook anomalies (5/hour).
+- Retention: per-row `expires_at` (90 days, critical 24 months); items linked to an open appeal are kept until it closes; processed outbox rows go after 30 days unless still referenced.
+
 ## 6. Changes required in the current code
 
 The routes marked "Change required" in Section 4 differ from this contract as follows. Each item is a code defect, not a reason to change this contract.
@@ -620,7 +762,7 @@ The routes marked "Change required" in Section 4 differ from this contract as fo
 | `POST /reviews/{review_id}/media-intents` | Absent | Verified Member image upload intent | RV 8, amendment A1 |
 | `GET /staff/moderation/reviews` | Returns content (title, body, display name, overall and category ratings) since 20 Oct, but still a bare list capped at 100 without cursor | 5.9 | RV 9.3 |
 | `GET /health/ready` | Returns `status` only | Add `build` and `db_revision` | PF 22.1 |
-| CORS | `allow_credentials=false`; no `X-CSRF-Token` or `Accept-Language` header | Section 1.2, with the R04 authentication milestone | PF 16.1 |
+| CORS | ~~`allow_credentials=false`; no `X-CSRF-Token` header~~ Done 27 Oct 2026 (R04): `allow_credentials=true`, `X-CSRF-Token` allowed, origins an explicit list. `Accept-Language` is a CORS-safelisted header already | Section 1.2 | PF 16.1 |
 | Client address | ~~Uvicorn runs with `--proxy-headers` and `FORWARDED_ALLOW_IPS` defaulting to `*`~~ Done 19 Oct (WP5): `--no-proxy-headers`; `app/client_address.py` reads only the configured provider-appended entry; the forged-header test on staging is still outstanding (Gate A) | Provider-appended address only | PF 14.2 |
 
 ## 7. Rate limits
@@ -634,6 +776,10 @@ Limits are configuration values. Starting values (PF 14.3):
 | Guest removal requests | 3 per guest scope per 24 h | 20 per 24 h | Fresh Turnstile token |
 | Receipt operations | 20 per receipt digest per hour | 100 per hour | Progressive delay after repeated failures |
 | Pending guest reviews | 50 per destination, 500 total | n/a | Administrator alert at 80 % |
+| Sign-up | n/a | 10 per hour | Fresh Turnstile token |
+| Sign-in failures | 5 per email digest per 15 minutes | 100 per hour | Refused with `429` while exhausted; a wrong TOTP code or password in `/auth/reauth` also counts |
+| Password-reset and resend requests | 3 per email digest per hour | 30 per hour | Fresh Turnstile token on reset |
+| Email-link confirmations | n/a | 30 per hour | The one-time token is single use |
 
 The client address is the provider-appended entry only (PF 14.2). IPv6 is truncated to /64 and stored only as a keyed digest. Public reads and staff routes have independent limits. Hitting a pending ceiling returns `503 GUEST_WRITES_PAUSED` for guest submissions only.
 

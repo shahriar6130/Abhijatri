@@ -27,8 +27,14 @@ services:
         sync: false
       - key: TURNSTILE_HOSTNAME      # e.g. app.<owned-domain>
         sync: false
-      - key: CORS_ALLOWED_ORIGINS
+      - key: CORS_ALLOWED_ORIGINS        # public app origin AND the ops dashboard origin, comma-separated
         sync: false
+      - key: REDIS_URL                   # Upstash rediss:// URL, region ap-southeast-1 (required in production)
+        sync: false
+      - key: OPS_DASHBOARD_TOKEN         # >= 32 random characters; unset hides /api/v1/ops entirely
+        sync: false
+      - key: VISIT_COUNTER_ENABLED
+        value: "true"
       - key: LOG_LEVEL
         value: INFO
       - key: DOCS_ENABLED

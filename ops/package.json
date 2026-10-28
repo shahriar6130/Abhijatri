@@ -1,0 +1,25 @@
+{
+  "name": "abhijatri-ops",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Private System Monitoring Dashboard (Docs/System-Monitoring-Dashboard.md). Separate build; never linked from the public app.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

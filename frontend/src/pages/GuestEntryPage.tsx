@@ -11,34 +11,52 @@ import { CATEGORY_LABEL } from '../components/reviews/reviewLabels';
 import { formatNumber } from '../utils/format';
 
 /**
- * Guest entry (Review.md 3.2 step 1): the guest gives a name, which stays on this device, and is
- * welcomed by it. The server only counts the device as "Guest #N" (API.md 5.14). Then the page
- * shows what a review asks for, read from `GET /review-parameters` (API.md 5.15).
+ * Guest entry (Review.md 3.2 step 1): the guest gives a name, which stays on this device for 30 days
+ * after the last visit, and is welcomed by it with the browser's guest tag such as `1C669-J0TDY`
+ * (Guest-Identity-and-Visits 3.3). Then the page shows what a review asks for, read from
+ * `GET /review-parameters` (API.md 5.15).
  *
  * This is an entry point, never a gate: every app route still opens directly for guests.
  */
 export const GuestEntryPage: React.FC = () => {
-  const { language, t } = useLanguage();
-  const { session, setGuestName, clearGuestName, signOut } = useSession();
+  const { t } = useLanguage();
+  const { session, setGuestName, clearGuestName, startAsNewGuest, signOut } = useSession();
   const navigate = useNavigate();
   const storedName = session.kind === 'guest' ? session.displayName : null;
-  const guestNumber = session.kind === 'guest' ? session.guestNumber : null;
+  const guestTag = session.kind === 'guest' ? session.guestTag : null;
 
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [renewing, setRenewing] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!normalizeGuestName(name)) {
       setError(t('আপনার নাম লিখুন।', 'Please enter your name.'));
       return;
     }
     setError(null);
-    setSaving(true);
-    await setGuestName(name);
-    setSaving(false);
+    setGuestName(name);
   };
+
+  // Drafts live only in the review form's state (no stored draft yet, R15), so nothing unsent can
+  // be orphaned by a new scope secret here.
+  const handleNewGuest = async () => {
+    setRenewing(true);
+    try {
+      await startAsNewGuest();
+    } finally {
+      setRenewing(false);
+    }
+  };
+
+  const tagBadge = guestTag && (
+    <p className="inline-flex items-center gap-2 text-sm font-semibold text-forest-primary dark:text-neon-lime">
+      <UserRound size={16} aria-hidden="true" />
+      {t('আপনি অতিথি', 'You are Guest')}{' '}
+      <code className="px-1.5 py-0.5 rounded bg-surface-container dark:bg-dark-surface-2 font-mono tracking-wide">{guestTag}</code>
+    </p>
+  );
 
   if (!storedName) {
     return (
@@ -49,10 +67,11 @@ export const GuestEntryPage: React.FC = () => {
           </h1>
           <p className="text-sm text-on-surface-variant dark:text-on-dark-muted">
             {t(
-              'কোনো অ্যাকাউন্ট লাগবে না। নামটি শুধু এই ডিভাইসে থাকে; সার্ভারে পাঠানো হয় না।',
-              'No account needed. Your name stays on this device and is never sent to the server.',
+              'কোনো অ্যাকাউন্ট লাগবে না। নামটি শুধু এই ডিভাইসে ৩০ দিন থাকে; সার্ভারে পাঠানো হয় না।',
+              'No account needed. Your name stays on this device for 30 days and is never sent to the server.',
             )}
           </p>
+          {tagBadge}
         </div>
         <form onSubmit={handleSubmit} noValidate className="tonal-card p-6 flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
@@ -78,7 +97,6 @@ export const GuestEntryPage: React.FC = () => {
           </div>
           <button
             type="submit"
-            disabled={saving}
             className="inline-flex items-center justify-center gap-2 min-h-[48px] rounded-full bg-forest-primary text-white dark:bg-neon-lime dark:text-dark-bg-base text-sm font-bold font-title disabled:opacity-60"
           >
             {t('প্রবেশ করুন', 'Continue')}
@@ -96,12 +114,13 @@ export const GuestEntryPage: React.FC = () => {
         <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark break-words">
           {t(`স্বাগতম, ${storedName}!`, `Welcome, ${storedName}!`)}
         </h1>
-        {guestNumber !== null && (
-          <p className="inline-flex items-center gap-2 text-sm font-semibold text-forest-primary dark:text-neon-lime">
-            <UserRound size={16} aria-hidden="true" />
-            {t(`আপনি অতিথি #${formatNumber(guestNumber, language)}`, `You are Guest #${guestNumber}`)}
-          </p>
-        )}
+        {tagBadge}
+        <p className="text-xs text-on-surface-variant dark:text-on-dark-muted">
+          {t(
+            'এই ব্রাউজার থেকে আপনার সব রিভিউতে একই অতিথি ট্যাগ দেখাবে, তাই পাঠকরা বুঝবেন সেগুলো একই অতিথির।',
+            'Your reviews from this browser show the same guest tag, so readers can see they came from the same guest.',
+          )}
+        </p>
         <div className="flex flex-wrap gap-3 pt-2">
           <Link
             to="/reviews"
@@ -135,6 +154,14 @@ export const GuestEntryPage: React.FC = () => {
             className="min-h-[44px] text-xs font-semibold text-on-surface-variant dark:text-on-dark-muted underline underline-offset-2"
           >
             {t('সাইন আউট', 'Sign out')}
+          </button>
+          <button
+            type="button"
+            onClick={handleNewGuest}
+            disabled={renewing}
+            className="min-h-[44px] text-xs font-semibold text-on-surface-variant dark:text-on-dark-muted underline underline-offset-2 disabled:opacity-60"
+          >
+            {t('নতুন অতিথি হিসেবে শুরু করুন', 'Start as a new guest')}
           </button>
         </div>
       </section>

@@ -378,7 +378,7 @@ Source: Review.md 3.1 and amendment A2; API.md 5.2 and section 6 ("Rejects `cate
 **Tests to add:** schema unit tests (range, unknown key, empty object, 7-key limit); PostgreSQL tests for rows per revision, deltas on publish, hide and withdraw, and no change for pending reviews; an HTTP test that `category_ratings` is accepted; the OpenAPI contract test.
 **Frontend switch afterwards:** `VITE_REVIEW_CATEGORY_RATINGS=true` in `frontend/.env` and on Vercel.
 
-### 5.3 Guest welcome and anonymous guest counter (new) — backend implemented 20 Oct 2026
+### 5.3 Guest welcome and anonymous guest counter (new) — backend implemented 20 Oct 2026 (superseded by 5.11)
 
 **Rule:** a Guest has no account (Review.md 1.1). The name the Guest types on the landing page stays in the browser (`localStorage` key `abhijatri_guest_name`) and is used for the welcome message and to pre-fill the review display name. **The server never receives or stores it.** The server counts distinct guest devices by the keyed digest of the existing `guest_scope_secret` (`src/api/reviews.ts:getGuestScopeSecret`), so a reload keeps the same number and no personal data is stored.
 
@@ -518,3 +518,314 @@ The scope owner ruled that only the number of guests per day is needed, never wh
 | Frontend | `recordDailyVisit()` reports at most once per Dhaka day per browser and keeps the first `visit_number` as "Guest #N" (`abhijatri_guest_number`, `abhijatri_guest_last_visit` in `localStorage`). |
 | Tests | `tests/test_guest_visits.py`: the table columns are exactly `{id, visited_at}`; any request field (name, old scope secret, device id) gives 422; each visit adds one row with the next number; a 20:30 UTC visit counts for the next Dhaka day; `daily` fills zero days; the `days` bounds are checked; HTTP shapes; rate limit 429. Frontend: `guests.test.ts`, where the body is exactly `{}`, a browser is counted once per day, and a later day keeps the first number. |
 | Run | ruff and mypy clean; `alembic upgrade head`, `check`, `downgrade -1` and `upgrade` clean; backend unit and integration suites green; frontend 29 tests, `tsc` and build clean. |
+
+### 5.11 Guest identity, visit counting and the System Monitoring Dashboard (22 October 2026; supersedes 5.3 and 5.10)
+
+Implements `Docs/Guest-Identity-and-Visits.md` and `Docs/System-Monitoring-Dashboard.md` phase 1. Owner choices of 22 Oct 2026 are in `Docs/Decisions.md`:
+
+- The guest tag is the unique guest identifier; typed names may repeat.
+- The guest name is a 30-day session.
+- Verified stays 0 until R04.
+- The dashboard is a separate `ops/` app.
+
+#### What was built
+
+| Area | Detail |
+|---|---|
+| Guest tag | `app/guest_tag.py`: `CrockfordBase32(SHA-256("abhijatri:guest-tag:v1\n" + scope secret))[50 bits]`, shown `XXXXX-XXXXX`. The spec test vector gives `1C669-J0TDY` in Python and TypeScript. `submit_guest_review` stores it in `reviews.guest_tag` (no dash). The client cannot send one: `guest_tag` in the body is a `422 UNKNOWN_FIELD`. |
+| Review feed | `GET /destinations/{id}/reviews` and the moderation queue return `guest_tag` ("1C669-J0TDY", or `null` for member reviews and older guest reviews). The destination page shows the name, then **"Anonymous guest · 1C669-J0TDY"** (বেনামী অতিথি). |
+| Visit counting | `app/visits.py`. `POST /guest-visits` takes exactly `{ "first_visit": bool }` and returns `204` with `no-store`. One `HINCRBY` and `EXPIRE` (8 days) in a single `MULTI` on `abj:{APP_ENV}:visits:{Dhaka date}` (fields `guest_new`, `guest_returning`, `member_new`, `member_returning`). If Redis is down or unset, the route still returns 204, `visits_dropped` goes up, and a warning without request data is logged. `VISIT_COUNTER_ENABLED=false` stops counting. The burst and durable per-network limits are unchanged. `GET /guest-visits/stats` is removed. |
+| Metrics | `visits.metrics()` is the one implementation of doc 5: Guest, Verified, New Guest, New Verified, A = total, B = new, Old = A − B. A hypothesis test checks that A − B always equals the returning visits. |
+| Roll-up | `visits.rollup()` takes a per-day `SET NX EX 300` lock and upserts the absolute values of each finished day (last 7) into `visit_daily_stats`. Running it twice gives the same row. A missing hash never zeroes a row. Triggered nightly by `.github/workflows/visit-rollup.yml` (00:15 Dhaka) and by every dashboard open. |
+| Member visits | `users.first_visit_on` / `last_visit_on` and `visits.record_member_visit()` (the doc 4.3 `UPDATE … RETURNING`). Wired into `GET /auth/session` with R04. |
+| Migration `0009_guest_tag_visit_stats` | Adds `reviews.guest_tag char(10)` with `ck_review_guest_tag` (guest reviews only, Crockford pattern). Adds `users.first_visit_on` and `last_visit_on`. Creates `visit_daily_stats` (RLS on, Supabase roles revoked). Copies the old `guest_visits` totals per Dhaka day into `guest_total_legacy`, then drops `guest_visits`. The downgrade reverses it. The revision id stays under Alembic's 32-character limit. |
+| Ops API | `app/ops/`, under `/api/v1/ops`. Routes: `GET /panels`, `GET /panels/{id}?days=7\|30\|90`, `GET /overview?days=`, `POST /jobs/visit-rollup`. **Access:** `OPS_DASHBOARD_TOKEN` as `Authorization: Bearer`, compared in constant time. Unset means every route is 404. A wrong token is 401; after 10 failures per network per hour the network gets 429. **Limits:** responses are `no-store`, with a burst limit of 60 per minute. |
+| Panels | `visitors`, `content`, `reviews`, `traffic`, `health`, `members` (`app/ops/providers/`). Each runs with a 2-second budget, and one failing panel shows `unavailable` without affecting the others. A missing number is `null`, never 0. Adding a panel takes one new provider file (doc 6.4). |
+| Event counters | `app/ops/events.py`: an `EVENT_NAMES` allowlist plus `route_5xx:<route template>`, counted in memory and flushed every `METRICS_FLUSH_SECONDS` to `abj:{env}:events:{date}`. Middleware counts 2xx, 4xx and 5xx, 429, `CHALLENGE_FAILED` and 5xx per route template (never raw paths). |
+| Logging | `RedactIdentifiers` in `app/main.py` replaces guest tags and `abr1_` receipts in every log line. |
+| Config | Production start-up fails unless `REDIS_URL` is a `rediss://` URL, and when `OPS_DASHBOARD_TOKEN` is set but shorter than 32 characters. CORS allows the `Authorization` header. |
+| Frontend | `src/api/guests.ts` changes: <ul><li>WebCrypto `guestTag()`.</li><li>The scope secret is created on the first visit.</li><li>New keys `abhijatri_first_visit_on` and `abhijatri_last_visit_on`.</li><li>The retired `abhijatri_guest_number` and `abhijatri_guest_last_visit` are read once (the browser counts as returning), then removed.</li><li>The 30-day name session uses `abhijatri_guest_name_seen_on`.</li><li>Sign-out forgets the name only.</li><li>"Start as a new guest" makes a new secret, and so a new tag, without resetting the visit dates.</li></ul> Other files: `SessionContext` counts a visit on every app load, with or without a name. The sidebar card and `/guest` show "Welcome, Sadia · Guest 1C669-J0TDY" plus the doc 3.3 notice. If storage is blocked, the tab keeps one tag. |
+| Ops app | `ops/`: Vite, React and TypeScript on port 5174. **Login:** a token prompt that keeps the token in `sessionStorage`. **Content:** a generic renderer for the four block types (stat, series with gaps for missing days, table, status), the 7/30/90 selector, per-panel refresh, the "Run roll-up" button and Bangla/English. **Hosting:** `vercel.json` sets `X-Robots-Tag: noindex`, a strict CSP and `no-store`. |
+| Local stack | `compose.yaml` gains a `redis` service on `127.0.0.1:6379`. The new variables are documented in `backend/.env.example`, `ops/.env.example` and `render.yaml`. |
+| CI | Two additions: a new `ops` job (`npm ci`, build, test), and a check that the public `frontend/dist` contains no ops route or token name. |
+
+#### Verification (22 Oct 2026)
+
+| Check | Result |
+|---|---|
+| Backend | ruff and mypy clean. 225 unit tests and 76 integration tests passed on PostgreSQL 17. `alembic upgrade head`, `check` (no drift) and `downgrade base` are clean. Three legacy `guest_visits` rows migrated to the correct Dhaka days (`2026-10-19: 1`, `2026-10-20: 2`). OpenAPI snapshot regenerated. |
+| Frontend | `tsc`, build and 38 vitest tests pass, including the tag parity vector, the once-per-day flag, the 30-day name, the retired-key migration and sign-out keeping the tag. |
+| Ops app | `tsc`, build and 4 tests pass. |
+| End to end (real Redis, real Postgres, running API) | 15 of 15 checks passed: <ul><li>Two visits return 204, and an extra field returns 422.</li><li>A guest review stores the server-derived tag.</li><li>After publishing, the destination feed returns `guest_display_name: "Rahim"` and the matching `guest_tag`.</li><li>A wrong ops token returns 401.</li><li>All six panels return `ok`.</li><li>Visitors today shows Guest 2, New Guest 1, A 2, B 1, Old 1, Verified 0.</li><li>No tag, secret or receipt appears in the dashboard output.</li><li>The roll-up route works.</li></ul> Redis held only `abj:development:visits:<date>` (`guest_new 1`, `guest_returning 1`) and the events hash. |
+
+#### Run everything on localhost (no Vercel, no Render)
+
+1. Start Postgres and Redis (from the repository root):
+   ```powershell
+   docker compose up -d postgres redis
+   ```
+2. Configure the backend. In `backend/.env` (copy of `.env.example`) set at least:
+   ```ini
+   APP_ENV=development
+   REDIS_URL=redis://localhost:6379/0
+   OPS_DASHBOARD_TOKEN=<python -c "import secrets;print(secrets.token_urlsafe(48))">
+   CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
+   ALLOW_TEST_STAFF_HEADER=true        # only to publish reviews locally with X-Test-Staff-Id
+   ```
+3. Migrate, seed and start the API:
+   ```powershell
+   cd backend
+   uv run alembic upgrade head
+   uv run python scripts/seed_destinations.py
+   uv run uvicorn app.main:app --reload            # http://localhost:8000
+   ```
+4. Start the public app: `cd frontend; npm run dev`, then open http://localhost:5173. The sidebar shows "Guest XXXXX-XXXXX". Write a review from a destination page.
+5. Publish the review. Guest reviews are `PENDING` until a moderator publishes them, and staff sign-in waits for R04. Locally, use the development staff header:
+   1. Create a user with the `MODERATOR` role in `user_platform_roles`.
+   2. Call `POST /api/v1/staff/moderation/reviews/{id}/decisions` with `X-Test-Staff-Id: <that user id>` and `{"expected_version": 1, "decision": "PUBLISH", "reason_code": "OK"}`.
+
+   The destination page then shows "Anonymous guest · XXXXX-XXXXX".
+6. Start the dashboard: `cd ops; npm install; npm run dev`, open http://localhost:5174 and paste the `OPS_DASHBOARD_TOKEN`.
+
+#### Deploying: Upstash, Render, Vercel, GitHub
+
+Secrets (the Redis URL and the ops token) go only into the host dashboards or GitHub secrets: never into git, chat or an MCP prompt. Use the MCP route for non-secret steps and status checks, and paste secret values into the web consoles yourself.
+
+**1. Upstash Redis (manual; once per environment)**
+
+1. Sign in at https://console.upstash.com and choose **Redis → Create database**.
+2. Fill in the form:
+   - Name: `abhijatri-prod`
+   - Type: **Regional**
+   - Region: **AP-Southeast-1 (Singapore)**, same as the API
+   - TLS: on (the default)
+3. Open the database and copy the **`rediss://default:<password>@<name>.upstash.io:6379`** URL (Connect → Redis URL). Use a separate database for staging.
+4. Check the free-plan command limit in the console (about 100,000 to 150,000 commands a month at 1,000 visitors a day; dashboard doc 8).
+
+**2. Render API (manual)**
+
+1. Open https://dashboard.render.com and select the **abhijatri-api** service, then **Environment**.
+2. Add or update these variables:
+   - `REDIS_URL` = the Upstash `rediss://…` URL.
+   - `OPS_DASHBOARD_TOKEN` = a new value from `python -c "import secrets;print(secrets.token_urlsafe(48))"`. Store it in the password manager of two owners.
+   - `CORS_ALLOWED_ORIGINS` = `https://<public-app>.vercel.app,https://<ops-app>.vercel.app`. Add the ops origin after step 4 has created it.
+   - `VISIT_COUNTER_ENABLED` = `true`.
+3. Click **Save, rebuild and deploy**. The Docker command runs `alembic upgrade head` on start, so migration `0009` is applied automatically. If the service is managed by the Blueprint, **Blueprints → Sync** asks for the new `sync: false` keys from `render.yaml`.
+4. Verify:
+   - `GET https://<api>/api/v1/health/ready` returns 200.
+   - `curl -X POST https://<api>/api/v1/guest-visits -H "Content-Type: application/json" -d '{"first_visit":false}'` returns 204.
+   - `curl https://<api>/api/v1/ops/panels -H "Authorization: Bearer <token>"` returns 200.
+
+   If the service does not start, the logs name the missing variable (the production guard).
+
+**2b. Render through MCP (optional)**
+
+1. Create an API key: Render Dashboard → Account Settings → API Keys.
+2. Connect Render's hosted MCP server in Claude Code:
+   ```powershell
+   claude mcp add --transport http render https://mcp.render.com/mcp --header "Authorization: Bearer <RENDER_API_KEY>"
+   ```
+3. Run `/mcp` to confirm it is connected, then ask, for example: "select my Render workspace", "list services", "show the latest deploy and logs of abhijatri-api", "set VISIT_COUNTER_ENABLED=true on abhijatri-api".
+4. Set `REDIS_URL` and `OPS_DASHBOARD_TOKEN` in the dashboard (step 2), not through the chat.
+
+This session had no Render MCP connected, so these steps were written, not run.
+
+**3. Public app on Vercel**
+
+No new variable is needed. Redeploy after merging, because Vite reads `VITE_*` values at build time. The existing `VITE_API_BASE_URL` must point to the Render API.
+
+**4. Ops dashboard on Vercel (manual)**
+
+1. Go to https://vercel.com/new, choose **Import Git Repository**, and pick `shahriar6130/Abhijatri`.
+2. Set **Project name** to something unlisted, such as `abhijatri-ops-<random>`, and **Root Directory** to **`ops`**. Vercel detects Vite (build `npm run build`, output `dist`).
+3. Under **Environment Variables** add `VITE_API_BASE_URL` = `https://<api>.onrender.com` (no trailing slash).
+4. Click **Deploy**, and note the `https://abhijatri-ops-<random>.vercel.app` origin.
+5. Tighten the CSP: in `ops/vercel.json`, change `connect-src` from the `*.onrender.com` / `*.up.railway.app` wildcards to the exact API origin, then commit and redeploy.
+6. Add the ops origin to the API's `CORS_ALLOWED_ORIGINS` (step 2), then open the dashboard and paste the token.
+7. Optional: Project → Settings → **Deployment Protection** → Vercel Authentication, as a second lock in front of the token, if your plan offers it for production.
+8. Do not add a link to the ops URL anywhere in the public app (rule R1).
+
+**4b. Vercel through MCP**
+
+1. Connect the Vercel MCP if it is not already connected (it is in this Claude session):
+   ```powershell
+   claude mcp add --transport http vercel https://mcp.vercel.com
+   ```
+2. Run `/mcp` and complete the Vercel sign-in.
+3. Ask Claude to create a Git-connected project from `shahriar6130/Abhijatri` with root directory `ops`, add the environment variable `VITE_API_BASE_URL=https://<api>`, and deploy production. Behind the scenes this uses the project, environment-variable and deployment tools.
+4. Ask for the deployment status and build logs to confirm.
+
+`VITE_API_BASE_URL` is not a secret. The ops token is never stored in Vercel: each person types it into the dashboard.
+
+**5. GitHub (nightly roll-up)**
+
+1. Open Repository → **Settings → Secrets and variables → Actions → New repository secret** and add:
+   - `OPS_API_URL` = `https://<api>.onrender.com`
+   - `OPS_DASHBOARD_TOKEN` = the same token as on Render.
+2. Actions → **Nightly visit roll-up** → **Run workflow** once to test. The job skips itself when the secrets are missing, and it wakes a sleeping free Render instance.
+
+**6. Rotation and the kill switches**
+
+- **Token:** change `OPS_DASHBOARD_TOKEN` on Render and in GitHub, then redeploy. Rotate when a team member leaves and at least each semester.
+- **Counting:** `VISIT_COUNTER_ENABLED=false` stops counting without a deploy of code.
+
+#### Known limits
+
+- **Verified numbers:** they are 0 until member sign-in (R04) calls `record_member_visit` from `GET /auth/session`. The dashboard says "member sign-in not built".
+- **Range totals:** these are visitor-days, not distinct people (doc 5). A person who browses as a guest and signs in on the same day counts in both.
+- **Unflushed event counts:** up to `METRICS_FLUSH_SECONDS` of counts can be lost if a free Render instance sleeps or restarts. Visit counters are written immediately and are not affected.
+- **Phase 2:** the token is replaced by staff sign-in with MFA and `ops.read` (dashboard doc 3.2), with R04 and R11.
+
+#### Deployment record (22 Oct 2026)
+
+The live API runs on **Railway**, not Render: project `sincere-warmth`, service `abhijatri-api`, region asia-southeast1. It builds `backend/Dockerfile` from the **`main`** branch, root `./backend`. The Dockerfile start command runs `alembic upgrade head`, so migration `0009` is applied when the new code first deploys.
+
+| Item | State |
+|---|---|
+| Ops dashboard | Vercel project `abhijatri-ops-44afee` (account `syedmuhtasimapon-8894`), https://abhijatri-ops-44afee.vercel.app. Deployed from `ops/` with the Vercel CLI and not linked to GitHub, so updates are `vercel deploy --prod` from `ops/`. `VITE_API_BASE_URL=https://abhijatri-backend.up.railway.app` is set for Production. The headers `noindex`, CSP and `no-store` were verified live. |
+| Railway variables set (no restart) | `OPS_DASHBOARD_TOKEN` (64 characters, generated locally and never printed), `CORS_ALLOWED_ORIGINS=https://abhijatri.vercel.app,https://abhijatri-ops-44afee.vercel.app`, `VISIT_COUNTER_ENABLED=true`. |
+| **Blocking before `backend-dev` reaches `main`** | `REDIS_URL` (Upstash `rediss://`) is **not set**. Railway runs `APP_ENV=production`, and the new code refuses to start there without it. Set it first: `railway variable set REDIS_URL --stdin --skip-deploys` from `backend/`, then paste the URL. |
+| Public app | Vercel project `abhijatri` (https://abhijatri.vercel.app) belongs to the `choturmatra30` account. Its owner redeploys it after the merge. |
+| Nightly roll-up | Add the GitHub secrets `OPS_API_URL=https://abhijatri-backend.up.railway.app` and `OPS_DASHBOARD_TOKEN` (the same token). |
+
+
+### 5.12 Security audit follow-up (22 October 2026)
+
+The full record is in `Docs/Security-Audit-2026-10-21.md`. In code:
+- **F-06 and F-09:** `app/main.py` adds the security headers, including a restrictive API CSP, to every response, including early 413 and 504 errors.
+- **F-03:** the config tests are hermetic.
+- **Audit §6 tests:** added as `tests/test_audit_additions.py`.
+- **F-02 and F-04:** React Router 7.18.4, Vite 8.3.5, Vitest 5.0.5 and plugin-react 6.1.2 in `frontend/` and `ops/`.
+- **F-01 guard:** a CI step, `.github/scripts/check_committed_secrets.py`, fails on credential URLs and on binary documents that are not allowlisted.
+
+Still open, owner actions:
+- **F-01:** rotate the Supabase password, update Railway `DATABASE_URL`, and remove the audit PDF from `backend-dev` history.
+- **F-04 remainder:** the Tailwind 4 migration.
+- **F-08:** the `ruff format` team decision.
+
+
+### 5.13 Verification, ops dashboard completion and deployment (27 October 2026)
+
+**Scope.** A full check of `Guest-Identity-and-Visits.md` and `System-Monitoring-Dashboard.md` against the code, the gaps closed, the local and live setup checked, and the dashboard deployed. Nothing was committed or pushed by the assistant; the owner pushes git.
+
+**Audit result.** Both documents match the code. Static audits (backend, frontend, ops app) found no missing feature; they found the gaps below, all closed.
+
+**Fixes in code**
+- **Tests ignored the developer's `.env`.** `.env` enabled the staff test header and set the ops token, so 6 tests failed on a developer machine. `tests/conftest.py` now disables `.env`, defaults `APP_ENV` to `development`, and points the app's own engine at `TEST_DATABASE_URL` when it is set, so tests never touch the dev database.
+- **Unhandled errors were not counted as 5xx.** `app/main.py`: the counting middleware now counts a raised exception as a 500 (and `route_5xx:<template>`), then re-raises. Before, the Traffic panel would have missed real failures.
+- **`reviews.submitted` was allowlisted but never counted.** `app/api.py` now counts it after a guest review commits.
+- **Stale comment** about Redis being deferred in `app/config.py` replaced.
+- **Frontend:** the guest review form notice now says the review is shown as "Anonymous guest" and that reviews from one browser share a guest tag (EN and BN); `recordDailyVisit` shares one in-flight request, so React StrictMode or two tabs send one visit.
+- **Ops app:** panel layout now comes from `GET /ops/panels` (`getCatalogue`, `orderByCatalogue`); table headers are bilingual.
+- **CI:** the public-build check fails if `frontend/dist` is empty and also looks for `abhijatri-ops`.
+
+**Tests added (all green)**
+- Backend: 5xx by route template, 60/minute limit, `no-store` on 200/401/404/429, CORS preflight with the `Authorization` header (ops origin allowed, others not), real counts in the content and traffic panels, health panel without secrets, log redaction filter (`test_log_redaction.py`), `reviews.submitted` counted.
+- Frontend: overlapping visit calls send one request; the review payload never sends a guest tag.
+- Ops app: API client (header only, `sessionStorage` only, error mapping), block rendering in both languages, catalogue ordering.
+
+**Results.** Backend 341 passed, 0 skipped (with `TEST_DATABASE_URL` set to the local `abhijatri_test` database on port 5434); ruff and mypy clean. Frontend 40 tests and build pass. Ops app 19 tests and build pass.
+
+**Local environment.** Postgres and Redis run from `compose.yaml` (`POSTGRES_PORT=5434`). Supabase is used only in production. The development database is at migration `0009_guest_tag_visit_stats`. All six panels returned `ok` on the local API.
+
+**Deployment state (27 October 2026)**
+- **Railway** (`sincere-warmth`, service `abhijatri-api`, production): deploy `a337d5c` on `main` is live at `https://abhijatri-backend.up.railway.app`. It has `OPS_DASHBOARD_TOKEN`, `REDIS_URL` and `CORS_ALLOWED_ORIGINS`. The ops routes answer `401` without a token, and the CORS preflight accepts `https://abhijatri-ops-44afee.vercel.app`. **This deploy predates the fixes above; they go live when `backend-dev` is merged to `main`.**
+- **Vercel** (account `syedmuhtasimapon-8894`, project `abhijatri-ops-44afee`, root `ops/`): `VITE_API_BASE_URL` set for Production to the Railway address, and `ops/` redeployed to production. The served bundle contains the Railway address and no localhost fallback; the response carries `X-Robots-Tag: noindex, nofollow, noarchive` and the strict CSP. The Vercel MCP connector was first signed in as a different account and was re-authorized as `syedmuhtasimapon-8894`.
+- The full test steps are in `Docs/System-Monitoring-Dashboard.md` section 12.
+
+**Open items (owner actions)**
+- Merge `backend-dev` to `main` so Railway redeploys the fixes.
+- Add the public frontend's Vercel origin to Railway `CORS_ALLOWED_ORIGINS` once it is known.
+- Add GitHub secrets `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` for the nightly roll-up workflow.
+- Check the live dashboard with the production token (the assistant never reads or prints it).
+- Still open from earlier: `visit_daily_stats` counters are nullable everywhere although only legacy days may be `NULL`; no frontend component tests; member visits wait for R04.
+Step 3: GitHub secrets for the nightly roll-up
+
+  1. Open the repo on GitHub: https://github.com/shahriar6130/Abhijatri. You
+     need admin or owner rights to add secrets. If the repo belongs to your
+     teammate, ask them to do this.
+  2. Go to Settings → Secrets and variables → Actions → New repository secret.
+  3. Add the first secret: Name OPS_API_URL, Secret
+     https://abhijatri-backend.up.railway.app (no trailing slash needed). Click
+     Add secret.
+  4. Add the second secret: Name OPS_DASHBOARD_TOKEN, Secret the same ops token
+     that is set on Railway. The Railway and local tokens may differ. Don't
+     paste the token into chat or commit it.
+  5. Test it: go to Actions → Nightly visit roll-up → Run workflow, pick the
+     branch, and run. A green run with "rolled_up" in the log means it works. A
+     green run that prints "secrets are not set; skipping" means a secret name
+     is wrong, so check the spelling.
+  6. After that it runs by itself at 00:15 Dhaka.
+**Update, 27 October 2026 (later): live Redis fixed.** The Upstash password saved in Railway `REDIS_URL` was rejected ("invalid username-password pair"), so the Health panel showed Redis down and Visitors and Traffic were degraded. The Upstash MCP server was added (`claude mcp add --scope user upstash https://mcp.upstash.com/mcp`, authorized in `/mcp`), the correct `rediss://` URL for the database `Abhijatri` (`first-monarch-177806.upstash.io`, ap-southeast-1) was tested with a PING, and `REDIS_URL` was set on Railway. After the redeploy (deploy `cd66c42d`, commit `a337d5c`, SUCCESS) all six panels returned `ok`, Redis `up` at 1.9 ms, and the counter flush is running. Visit counters start at 0 on the live site. Two things to remember: the dashboard must be opened at the fixed address `https://abhijatri-ops-44afee.vercel.app` (per-deployment Vercel addresses are not in `CORS_ALLOWED_ORIGINS`), and it needs Railway's `OPS_DASHBOARD_TOKEN`, which differs from the one in `backend/.env`.
+
+
+### 5.14 Accounts (R04), staff roles and the moderation API (27 October 2026)
+
+Full decisions are in `Docs/Decisions.md` (27 Oct 2026). Supabase Auth is the identity provider, run locally with the Supabase CLI; the API proxies it and keeps the tokens in HttpOnly cookies.
+
+**Built and tested**
+- **Member accounts (R04, R05):** `/api/v1/auth/*`: register, verify email, resend, sign in, sign out, password reset, `csrf`, `session` (also counts the member's visit day), TOTP enrol and verify, `reauth`. Same answers for known and unknown addresses; durable throttles for sign-in failures, sign-up, resets and link confirmations; reserved and look-alike display names refused. Code: `backend/app/auth/*`. Public pages: `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password`; `SessionContext` is server-backed; members can report a review.
+- **Roles:** `user_roles`, guard row, last-superadmin protection, `python -m app.jobs.bootstrap_admin`. Migration `0010_auth_roles`.
+- **Moderation foundation:** append-only `audit_events`, `idempotency_keys` (`0011_audit_idempotency`); `moderation_tasks` with claim leases, `reports`, task and request ids on `moderation_actions` (`0012_tasks_reports`).
+- **Staff API `/api/v1/admin/*`:** queue, claim, heartbeat, release, escalate; decisions with version, lease, idempotency key and an atomic audit and outbox row; bulk decisions with per-item results; reports and their transitions; audit listing and lookup; staff list, user search and role changes (password re-confirmation); monitoring summary. Code: `backend/app/admin/*`.
+- **Staff dashboard:** new `staff/` app (port 5175): sign-in with TOTP enrolment (QR and secret), queue with live lease countdown and heartbeat, review and report decisions, escalation, audit viewer, staff roles with a re-confirmation dialog, monitoring tiles, English and Bangla.
+- **Tests:** backend 410 passing against real PostgreSQL (including simultaneous-claim and last-superadmin races, append-only audit, idempotency replay, stale tab after escalation); frontend 55, staff 22, ops 19. `backend/scripts/e2e_smoke.py` runs about 35 steps against the real local Supabase stack, including real TOTP. The UI was also driven in Chrome: sign-up, verification, sign-in, session survival, sign-out, report, claim, publish, hide, role grant, TOTP enrolment and the QR code.
+- **Bugs the tests found and fixed:** a refreshed access token was not used for the follow-up Auth call; the role guard row was missing in a database built from the models, so the race protection did nothing there; the staff app fetched a CSRF token before sign-in; the enrolment QR was not drawable until re-encoded.
+
+**Not built yet (specification phases 3 to 5)**
+- Verification cases and evidence storage (a private bucket with short-lived signed URLs), enforcement cases and sanctions, appeals with their independence rule.
+- The notification outbox worker, the Resend adapter, daily digests and retention jobs.
+- A `moderation` panel on the monitoring dashboard; staff screens for the items above.
+- Production sign-in needs the owned same-site domain (PF 5.5).
+
+### 5.15 Verification, enforcement, appeals, notifications and retention (27 October 2026)
+
+**Built and tested** (specification phases 3 to 5):
+- **Verification cases** (`app/admin/cases.py`, migration `0013`): request, private evidence upload via signed URL to the Storage bucket `verification-evidence`, staff transitions with the table of spec 7.1, escalation to a superadmin, clarification round trip, approval writes `verifications` (`VERIFIED_MEMBER`, `APPROVED`) and the session reports `verified_member`.
+- **Enforcement and sanctions:** review takedowns (emergency path with a 24-hour superadmin follow-up task), removal and restore with a separate `counts_toward_rating`, account cases, warnings, posting restrictions and suspensions (a suspension disables the account), reversal and automatic expiry.
+- **Appeals:** standing check, 30-day deadline in Dhaka time, one appeal per decision, independent reviewer, overturn effects for each target type, original decisions preserved.
+- **Notifications** (`app/notify/*`, migration `0014`): the shared outbox gained status, lease, retries and errors; an in-process relay (`FOR UPDATE SKIP LOCKED`) fans events out into unique notifications; critical notices emailed at once (Mailpit locally, Resend in production), others in a daily digest; `ambiguous` sends are never resent blindly; live delivery to the browser over Server-Sent Events.
+- **Retention** (`python -m app.jobs.retention`): evidence and rejected cases, notifications (90 days, critical 24 months), sanction expiry; open appeals are re-checked under a lock before anything is deleted.
+- **Screens:** public app notification bell (live), `/account/verification`, `/account/appeals`, Verified Member badge; staff app queue views and forms for verification, appeals and emergency follow-ups, an Enforcement tab, and new monitoring tiles.
+- **Tests:** backend 427 passing on real PostgreSQL; `scripts/e2e_cases.py` against the real local stack (live notification measured at 2.5 s, approval email received, evidence round trip through Storage, independent-reviewer refusal).
+
+**Still open**
+- ~~Member review submission itself is Gantt R07 (not built)~~ Built 27 Oct 2026, see 5.16.
+- Provider webhooks (bounces, complaints) and their de-duplication: Resend webhooks are not wired yet.
+- Production: hosted Supabase Auth settings, `RESEND_API_KEY` and a verified sending domain, the same-site domain for cookies, and migrations `0010` to `0014` on the production database.
+
+### 5.16 Member reviews with photos and video (27 October 2026)
+
+Owner decisions: any signed-in member may attach media (not only Verified Members); video per Review.md A4 **without transcoding**. API in API.md 5.20; decisions in Decisions.md.
+
+**Built and tested**
+- `POST /reviews/member` (`app/services.py::submit_member_review`): the review is owned by the account (`author_user_id`), uses the same draft id and receipt recovery as guests, needs the session and CSRF token instead of Turnstile, and allows one active review per member, destination and visit month (`409 MEMBER_REVIEW_EXISTS`).
+- Media (`app/media.py`, migration `0016_review_media`, private bucket `review-media`): upload intent → browser PUT to a signed URL → `complete`, where the server reads the real file. Photos: JPEG/PNG/WebP only, at most 8 MiB and 20 megapixels, re-encoded to WebP without EXIF/GPS (Pillow). Video: MP4 with H.264 + AAC, at most 50 MiB and 60 s; metadata boxes and extra tracks are blanked in place. Bad files are deleted at once with a field code (`BROKEN`, `TYPE`, `TOO_LARGE`, `TOO_MANY_PIXELS`, `TOO_LONG`, `VIDEO_CODEC`, `NOT_UPLOADED`).
+- Moderation: the queue shows pending media; `rejected_media_ids` on a PUBLISH decision rejects single items; REJECT rejects all; states and the audit record commit with the decision. Staff preview through five-minute links.
+- Corrections (added after a photo was rejected by a mis-ticked box): `GET /admin/media` and `POST /admin/media/{media_id}/decision` let staff approve or reject a decided photo or video, audited as `media.approve` / `media.reject`; the staff decision form now shows a ticked "Publish" box per file instead of a "must not be published" box; staff Media tab.
+- Public feed: `author_display_name` for member reviews and approved `media` with one-hour signed links. Retention purges uploads not completed within 24 hours.
+- Screens: the review form (members post under their account name, choose up to 5 photos and 1 video with description and ownership tick, see upload progress and any refused file on the receipt), a gallery on review cards, and media preview plus per-item rejection in the staff queue.
+- Tests: `tests/test_media.py` (17: EXIF/GPS removal, scaling, SVG/GIF/oversized/truncated images, MP4 metadata stripping with unchanged offsets, too long, HEVC, non-MP4, the full submit → upload → moderate → feed flow, upload rules, rejection, abandoned purge). Backend 454 passing; frontend 56 and staff 23 vitest passing; both apps build.
+
+**Still open**
+- ~~Migration `0016_review_media` on the online database~~ Applied 27 Oct 2026 (owner approved); a photo and a video were uploaded through online Storage and a GIF posing as JPEG was refused (`TYPE`).
+- No video poster image or low-bitrate rendition (no transcoding by decision); approved media of a later hidden or removed review stay stored until the review is deleted.
+
+### 5.17 Notification system v1.1 (28 October 2026)
+
+Implements `Docs/Notification-Documentation.md` in full; its section 14 is ticked with the evidence for each item.
+
+**Built and tested**
+- Migration `0017_notification_system`: outbox fields and statuses, notification priority/audience/template/delivery mode/archive/expiry, and the tables `notification_deliveries`, `notification_delivery_attempts`, `notification_provider_events`, `notification_templates`, `notification_rules`, `notification_preferences`, `notification_suppressions`, `notification_digests`. Existing email state and attempt history are carried over (checked on a copy with old rows); RLS on, no browser-role grants.
+- `app/notify/`: `registry.py` (catalogue: every spec 3 event), `events.py` (producers, dedupe, captured staff), `messages.py` (resolvers, role re-check, templates), `worker.py` (relay with lease owner, retry, dead letter, start-up defaults), `delivery.py` (deliveries, attempts, retry schedule, suppressions, current verified address, crash reconciliation, per-person digest), `alerts.py` (lease expiring, queue overdue, escalation, repeated denials, failure/backlog/webhook thresholds, deduplicated), `webhooks.py` (Resend and Brevo), `admin_routes.py` (superadmin monitoring, retry, suppressions, templates, rules).
+- New events: review decisions carry the decision and author; staff role changes, escalations, assignments (new `POST /admin/tasks/{id}/assign`), password changes (security notice), clarification questions.
+- Member API: cursor inbox, unread count, PATCH read/archive, mark-all-read, preferences; SSE kept as a hint.
+- Retention: per-row expiry with open-appeal preservation; processed outbox rows after 30 days.
+- Ops dashboard: new Notifications panel (independent of the worker); the Members panel now reads `user_roles` and shows sign-in as live.
+- Screens: public `/account/notifications` (inbox, filters, archive, email preferences) and a bell that refetches after a reconnect; staff Inbox tab, superadmin Notifications tab (outbox, deliveries with attempts and retry, suppressions, templates and rules), Assign control in the queue.
+- Tests: `tests/test_notifications.py` (26) plus updated `test_cases.py`, `test_rls.py` (grants), `test_ops.py`. Backend 481 passing; public app 59 and staff 24 vitest passing; both apps build.
+
+**Still open**
+- ~~Apply `0017` online~~ Applied 28 Oct 2026 (owner approved): old rows carried over, RLS on, no browser grants; live check on the online project created a member receipt (email off by preference) and a superadmin staff notice.
+- Configure `RESEND_WEBHOOK_SECRET` or `BREVO_WEBHOOK_TOKEN` and point the provider's webhook at `/api/v1/webhooks/notifications/{provider}` once a real email provider is live.
+

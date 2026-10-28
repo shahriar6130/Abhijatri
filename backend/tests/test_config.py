@@ -10,6 +10,13 @@ SUPABASE = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every case states its own configuration; no ambient CI or shell variable leaks in (audit F-03)."""
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+
+
 def _prod(**overrides) -> Settings:
     values = {
         "app_env": "production",
@@ -20,6 +27,7 @@ def _prod(**overrides) -> Settings:
         "turnstile_enabled": True,
         "turnstile_secret": "0x4AAAAAAA-secret",
         "turnstile_hostname": "app.example.com",
+        "redis_url": "rediss://default:pw@apn1-example.upstash.io:6379",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -52,6 +60,10 @@ def test_production_accepts_valid_configuration() -> None:
         {"turnstile_enabled": False},
         {"turnstile_secret": None},
         {"turnstile_hostname": None},
+        {"redis_url": None},
+        {"redis_url": "redis://default:pw@apn1-example.upstash.io:6379"},  # TLS is required
+        {"ops_dashboard_token": "too-short"},
+        {"auth_skip_email_verification": True},  # every production account proves its email
     ],
 )
 def test_production_fails_closed(overrides: dict) -> None:
@@ -59,8 +71,12 @@ def test_production_fails_closed(overrides: dict) -> None:
         _prod(**overrides)
 
 
+def test_production_accepts_a_long_ops_token() -> None:
+    assert _prod(ops_dashboard_token="t" * 43).ops_dashboard_token == "t" * 43
+
+
 def test_development_keeps_defaults() -> None:
-    settings = Settings(_env_file=None)
+    settings = Settings(_env_file=None, app_env="development")
     assert settings.docs_are_enabled is True
     assert settings.cors_origins == ["http://localhost:5173"]
 
@@ -86,17 +102,19 @@ def test_invalid_timezones_are_rejected(overrides: dict) -> None:
         Settings(_env_file=None, app_env="test", **overrides)
 
 
-def test_unset_environment_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("APP_ENV", raising=False)
+def test_unset_environment_fails_closed() -> None:
     with pytest.raises(ValidationError):  # unset APP_ENV is production, which needs the full set
         Settings(_env_file=None, receipt_pepper=GOOD_PEPPER)
     settings = Settings(
         _env_file=None,
+        database_url=SUPABASE,
         receipt_pepper=GOOD_PEPPER,
+        cors_allowed_origins="https://app.example.com",
         client_address_header="X-Forwarded-For",
         turnstile_enabled=True,
         turnstile_secret="s" * 20,
         turnstile_hostname="app.example.com",
+        redis_url="rediss://default:pw@apn1-example.upstash.io:6379",
     )
     assert settings.is_production
     assert not settings.docs_are_enabled

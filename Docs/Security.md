@@ -78,6 +78,8 @@ The legal register must be reviewed again when law, regulation, hosting region, 
 |---|---|---|---|---|
 | Guest display-name snapshot and review content | Moderation and publication | PostgreSQL | May be personal data | Implemented |
 | Guest scope hash | Permanent offline-draft deduplication | PostgreSQL | Pseudonymous credential-derived data | Implemented |
+| Guest tag (`reviews.guest_tag`) | Public pseudonym shown as "Anonymous guest · 1C669-J0TDY" on the guest's published reviews; derived from the scope secret (Guest-Identity-and-Visits 3.1) | PostgreSQL, public with the review | Public pseudonym; never logged (log filter redacts the pattern) | Implemented 22 Oct 2026 |
+| Daily visit counters | Guest / Verified, new / returning visits per Asia/Dhaka day | Upstash Redis (8-day TTL), then `visit_daily_stats` | Aggregate, no identifiers | Implemented 22 Oct 2026 |
 | Receipt hash | Guest review management | PostgreSQL | Pseudonymous authentication data | Implemented |
 | Client draft UUID | Retry safety | PostgreSQL and IndexedDB | Pseudonymous identifier | Implemented |
 | Member email and password hash | Authentication | PostgreSQL | Personal data | Build requirement |
@@ -106,6 +108,8 @@ Secrets, tokens, raw verification documents, and private review bodies must not 
 The review submission notice, Privacy Policy, Terms and Conditions, and notice-and-takedown process must be versioned and available in Bangla and English with equal prominence. `consent_version` on each review revision records the submission notice accepted for that version.
 
 The submission notice must explain:
+
+- "Your reviews from this browser show the same guest tag, so readers can see they came from the same guest." (Guest-Identity-and-Visits 3.3, added 22 Oct 2026.)
 
 - The review becomes public only after moderation.
 - The display-name snapshot and review may identify the author.
@@ -164,6 +168,8 @@ Retention jobs run under a dedicated identity, are idempotent, and create an aud
 ### 3.8 Processors and cross-border transfer
 
 **Deploy gate:** Maintain a processor register for hosting, database, object storage, email, DNS, monitoring, and any CDN or Redis provider. Record purpose, data categories, legal entity, region, subprocessors, security terms, breach commitments, deletion support, and exit procedure.
+
+**Upstash (added 22 Oct 2026):** Redis in ap-southeast-1, one database per environment, holding aggregate visit and request counters only (no guest tag, secret, IP, user id or user agent). Purpose: visit statistics and the ops dashboard (`Docs/Decisions.md`, 22 Oct 2026).
 
 No personal data is transferred outside Bangladesh until the legal transfer condition, destination suitability, required consent or contract basis, and actual storage region are documented against the Personal Data Protection Act, 2026 and applicable regulations.
 
