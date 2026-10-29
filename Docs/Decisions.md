@@ -256,7 +256,7 @@ Scope owner (Shahriar Islam), 20 Oct 2026: "Guest er shudhu count rakhlei hobe â
 |---|---|---|
 | ERD and contract location | `Docs/Schema.md` (Mermaid ERD, implemented vs planned) and `Docs/api/API.md` plus `Docs/api/openapi-v1.json`. | One reviewed source for Abdullah and Irfan. |
 | Contract drift | `tests/test_openapi_contract.py` fails when `app.openapi()` differs from the committed snapshot or a route is missing from `Docs/api/API.md`; `tests/test_docs_schema.py` does the same for tables. | Keeps documents honest without manual review. |
-| Pending-review edit | `PATCH /reviews/{id}/pending` stays **planned (R07)**; it is not implemented in this slice. | Avoids shipping unreviewed revision logic during a documentation task. |
+| Pending-review edit | `PATCH /reviews/{id}/pending` was planned (R07) and is **implemented 29 Oct 2026** (Backend-Implemented.md 5.18). | The documentation-only slice deferred it; R07 builds it with revisions and tests. |
 | Versioning | Additive changes stay in `/api/v1`; breaking changes need `/api/v2`. | Frontend can rely on stability. |
 
 ## 2026-10-15 (F06 follow-up)

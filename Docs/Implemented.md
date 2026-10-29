@@ -12,8 +12,8 @@ Claims here are limited to what is in the repository and evidenced by a test, mi
 | Production config guard, CORS allow-list, docs toggle, readiness probe | Implemented | `tests/test_config.py`; `app/main.py`. |
 | CI (lint, unit, integration, migrations, audit, secret scan, image build) | Defined | `.github/workflows/ci.yml`; first green run to be confirmed on the PR. |
 | Render deployment blueprint | Defined, not yet applied | `render.yaml`; requires dashboard setup and the Supabase URL. |
-| Pending-review edit endpoint (`PATCH /reviews/{id}/pending`) | Not implemented | Decided in Decisions.md; endpoint absent from `app/api.py`. |
-| Member reviews, accounts, verification, reports, appeals | Not implemented | Gantt R04, R07, R11. |
+| Pending-review edit endpoint (`PATCH /reviews/{id}/pending`) | Implemented 29 Oct 2026 (R07) | `app/api.py::edit_unpublished_review`; `tests/test_review_crud.py`. |
+| Member reviews, accounts, verification, reports, appeals, review edit/read/history | Implemented (see the R04, R07 and R11 entries and `Docs/Backend-Implemented.md` 5.13 to 5.18) | The older "not implemented" label here was out of date. |
 | Production authentication, staff MFA, CSRF | Not implemented | Security.md deploy gates; staff API returns 501 in production. Rate limiting is implemented (WP5 row below). |
 | ERD (`Docs/Schema.md`) and API contract (`Docs/api/API.md`, `Docs/api/openapi-v1.json`) | Implemented, review pending | Contract and schema drift tests; sign-off in `Docs/Reviews/F02-review.md`. |
 | Row-level security on all public tables | Implemented | `migrations/versions/0002_enable_rls.py`; `tests/test_rls.py`. |

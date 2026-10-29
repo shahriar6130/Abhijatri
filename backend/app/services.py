@@ -4,17 +4,19 @@ import base64
 import unicodedata
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import crypto
 from app.admin.tasks import cancel_open_tasks, ensure_task
+from app.config import get_settings
 from app.guest_tag import stored_guest_tag
 from app.models import (
+    Appeal,
     Destination,
     DestinationCategoryStats,
     DestinationRatingStats,
@@ -27,6 +29,7 @@ from app.models import (
     Review,
     ReviewCategory,
     ReviewCategoryRating,
+    ReviewMedia,
     ReviewReceipt,
     ReviewRevision,
     ReviewStatus,
@@ -35,7 +38,17 @@ from app.models import (
     Verification,
 )
 from app.notify import events
-from app.schemas import CategoryAverage, GuestReviewCreate, MemberReviewCreate, ReviewContent
+from app.schemas import (
+    CategoryAverage,
+    GuestReviewCreate,
+    MemberReviewCreate,
+    OwnerMedia,
+    ReviewContent,
+    ReviewDetail,
+    ReviewEdit,
+    ReviewSummary,
+    RevisionInfo,
+)
 
 
 class ReviewError(Exception):
@@ -95,7 +108,14 @@ def normalize_guest_name(value: str) -> str:
     return normalized
 
 
-APPEAL_WINDOW = timedelta(days=30)
+APPEAL_DAYS = 30
+
+
+def appeal_deadline(decided_at: datetime) -> datetime:
+    """End of the 30th day after the decision, in the policy time zone (Asia/Dhaka)."""
+    zone = get_settings().display_tz
+    last_day = decided_at.astimezone(zone).date() + timedelta(days=APPEAL_DAYS)
+    return datetime.combine(last_day, time(23, 59, 59), tzinfo=zone).astimezone(UTC)
 
 
 def require_receipt_format(receipt_secret: str) -> None:
@@ -321,21 +341,38 @@ class RejectionDetails:
 
 
 def rejection_details(session: Session, review: Review) -> RejectionDetails:
-    """Public-safe reason and appeal deadline; both are None unless the review is REJECTED."""
-    if review.status != ReviewStatus.REJECTED:
+    """Public-safe reason and appeal deadline.
+
+    A REJECTED review gives both. A review the moderators sent back (CHANGES_REQUESTED) gives the
+    reason only, because there is nothing to appeal. Any other state gives neither.
+    """
+    if review.status == ReviewStatus.REJECTED:
+        decision = ModerationDecision.REJECT
+    elif review.status == ReviewStatus.CHANGES_REQUESTED:
+        decision = ModerationDecision.REQUEST_CHANGES
+    else:
         return RejectionDetails(None, None)
     action = session.scalar(
         select(ModerationActionRecord)
-        .where(
-            ModerationActionRecord.review_id == review.id,
-            ModerationActionRecord.decision == ModerationDecision.REJECT,
-        )
+        .where(ModerationActionRecord.review_id == review.id, ModerationActionRecord.decision == decision)
         .order_by(ModerationActionRecord.created_at.desc())
         .limit(1)
     )
     if action is None:
         return RejectionDetails(None, None)
-    return RejectionDetails(action.reason_code, action.created_at + APPEAL_WINDOW)
+    deadline = appeal_deadline(action.created_at) if decision == ModerationDecision.REJECT else None
+    return RejectionDetails(action.reason_code, deadline)
+
+
+def review_appeal_state(session: Session, review_id: uuid.UUID) -> str | None:
+    """State of the newest live appeal against a decision on this review, if any."""
+    return session.scalar(
+        select(Appeal.state)
+        .join(ModerationActionRecord, ModerationActionRecord.id == Appeal.moderation_action_id)
+        .where(ModerationActionRecord.review_id == review_id, Appeal.state != "withdrawn")
+        .order_by(Appeal.submitted_at.desc())
+        .limit(1)
+    )
 
 
 def _lock_review(session: Session, review_id: uuid.UUID) -> Review:
@@ -564,6 +601,12 @@ def moderate_review(
         review.status = ReviewStatus.REJECTED
         review.rating_eligibility = RatingEligibility.INELIGIBLE_REMOVED
         revision.status = RevisionStatus.REJECTED
+    elif decision == ModerationDecision.REQUEST_CHANGES:
+        # Sent back to the author, who edits it (PATCH /reviews/{id}/pending) and resubmits.
+        # Nothing was counted while it was unpublished, so no aggregate moves.
+        if review.status not in {ReviewStatus.PENDING, ReviewStatus.UNDER_REVIEW}:
+            raise ReviewConflict("changes can be requested only on a pending review")
+        review.status = ReviewStatus.CHANGES_REQUESTED
     elif decision == ModerationDecision.HIDE:
         if review.status != ReviewStatus.PUBLISHED:
             raise ReviewConflict("only a published review can be hidden")
@@ -673,8 +716,14 @@ def set_review_conflict(
     return review
 
 
-def withdraw_review(session: Session, review_id: uuid.UUID, expected_version: int) -> Review:
+def withdraw_review(
+    session: Session, review_id: uuid.UUID, expected_version: int, *, author_id: uuid.UUID | None = None
+) -> Review:
+    """Withdraw a review. A Guest route proves ownership with the receipt before calling; a member
+    passes ``author_id`` and any other person's review answers as not found."""
     review = _lock_review(session, review_id)
+    if author_id is not None and review.author_user_id != author_id:
+        raise ReviewNotFound("review not found")
     # Withdrawal is idempotent: a retry after a lost response must succeed, so the
     # already-withdrawn answer comes before the version check (API.md 5.4).
     if review.status in {ReviewStatus.WITHDRAWN, ReviewStatus.DELETED}:
@@ -737,3 +786,221 @@ def encode_cursor(published_at: datetime, review_id: uuid.UUID) -> str:
     raw = f"{published_at.isoformat()}|{review_id}".encode()
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
+
+
+# ---- R07: edit an unpublished review, owner reads and history ----
+
+EDITABLE_STATUSES = frozenset({ReviewStatus.PENDING, ReviewStatus.CHANGES_REQUESTED})
+
+
+@dataclass(frozen=True)
+class EditResult:
+    review: Review
+    revision: int
+
+
+def edit_pending_review(
+    session: Session,
+    review_id: uuid.UUID,
+    edit: ReviewEdit,
+    *,
+    author_id: uuid.UUID | None = None,
+) -> EditResult:
+    """Edit a review that is not yet published (Review.md 5.2, API.md 5.5).
+
+    The edit becomes a new append-only revision and the review goes back to PENDING for moderation.
+    Published reviews are never edited in the MVP. A Guest route proves ownership with the receipt
+    before calling; a member passes ``author_id`` and any other person's review answers as not found.
+    """
+    review = _lock_review(session, review_id)
+    if author_id is not None and review.author_user_id != author_id:
+        raise ReviewNotFound("review not found")
+    if review.status not in EDITABLE_STATUSES:
+        raise ReviewConflict("only a pending review can be edited")
+    if review.version != edit.expected_version:
+        raise ReviewConflict("review version changed", "REVIEW_VERSION_CONFLICT")
+    current = session.get(ReviewRevision, review.current_revision_id) if review.current_revision_id else None
+    if current is None:
+        raise ReviewConflict("review has no current revision")
+
+    changes = edit.model_dump(exclude={"expected_version", "receipt_secret"}, exclude_unset=True)
+    if "category_ratings" in changes:
+        ratings: dict[ReviewCategory, int] = dict(changes["category_ratings"] or {})
+    else:
+        ratings = dict(revision_category_ratings(session, [current.id])[current.id])
+
+    overall_rating = changes.get("overall_rating", review.overall_rating)
+    visit_month: date = changes.get("visit_month", review.visit_month)
+    if overall_rating != review.overall_rating or visit_month != review.visit_month:
+        review.overall_rating = overall_rating
+        review.visit_month = visit_month
+        try:
+            with session.begin_nested():
+                session.flush()  # the member's one-review-per-destination-and-month index is checked here
+        except IntegrityError:
+            raise ReviewConflict(
+                "member already reviewed this destination for that month", "MEMBER_REVIEW_EXISTS"
+            ) from None
+
+    sequence = (
+        session.scalar(select(func.max(ReviewRevision.sequence)).where(ReviewRevision.review_id == review.id)) or 0
+    ) + 1
+    current.status = RevisionStatus.SUPERSEDED
+    revision = ReviewRevision(
+        review_id=review.id,
+        sequence=sequence,
+        status=RevisionStatus.PENDING,
+        language=changes.get("language", current.language),
+        traveller_type=changes.get("traveller_type", current.traveller_type),
+        comfort_tier=changes.get("comfort_tier", current.comfort_tier),
+        title=changes.get("title", current.title),
+        body=changes.get("body", current.body),
+        overall_rating=overall_rating,
+        consent_version=changes.get("consent_version", current.consent_version),
+    )
+    session.add(revision)
+    session.flush()
+    for category, rating in ratings.items():
+        session.add(ReviewCategoryRating(revision_id=revision.id, category=category, rating=rating))
+
+    review.current_revision_id = revision.id
+    review.status = ReviewStatus.PENDING
+    review.version += 1
+    review.updated_at = now_utc()
+    session.add(
+        OutboxEvent(
+            topic="review.edited",
+            aggregate_id=review.id,
+            payload={
+                "review_id": str(review.id),
+                "destination_id": str(review.destination_id),
+                "revision": sequence,
+                "version": review.version,
+            },
+        )
+    )
+    ensure_task(session, "review_moderation", review.id)  # back in the moderators' queue
+    return EditResult(review=review, revision=sequence)
+
+
+def review_detail(session: Session, review: Review, *, staff: bool) -> ReviewDetail:
+    """The owner's (or a moderator's) full view. Moderator-only fields are filled only when ``staff``."""
+    revision = session.get(ReviewRevision, review.current_revision_id) if review.current_revision_id else None
+    if revision is None:
+        raise ReviewNotFound("review not found")
+    details = rejection_details(session, review)
+    revisions = session.scalars(
+        select(ReviewRevision).where(ReviewRevision.review_id == review.id).order_by(ReviewRevision.sequence)
+    ).all()
+    media = session.scalars(
+        select(ReviewMedia)
+        .where(ReviewMedia.review_id == review.id, ReviewMedia.state != "removed")
+        .order_by(ReviewMedia.position, ReviewMedia.id)
+    ).all()
+    return ReviewDetail(
+        id=review.id,
+        destination_id=review.destination_id,
+        author_type="MEMBER" if review.author_user_id else "GUEST",
+        status=review.status,
+        version=review.version,
+        rating_eligibility=review.rating_eligibility.value,
+        language=revision.language,
+        traveller_type=revision.traveller_type,
+        comfort_tier=revision.comfort_tier,
+        visit_month=review.visit_month,
+        title=revision.title,
+        body=revision.body,
+        overall_rating=review.overall_rating,
+        category_ratings=revision_category_ratings(session, [revision.id])[revision.id],
+        consent_version=revision.consent_version,
+        created_at=review.created_at,
+        published_at=review.published_at,
+        withdrawn_at=review.withdrawn_at,
+        decision_reason=details.decision_reason,
+        appeal_deadline=details.appeal_deadline,
+        appeal_state=review_appeal_state(session, review.id),
+        revisions=[
+            RevisionInfo(sequence=item.sequence, status=item.status.value, created_at=item.created_at)
+            for item in revisions
+        ],
+        media=[
+            OwnerMedia.model_validate(
+                {"id": item.id, "kind": item.kind, "state": item.state, "alt_text": item.alt_text, "caption": item.caption}
+            )
+            for item in media
+        ],
+        guest_display_name=review.guest_display_name if staff else None,
+        author_user_id=review.author_user_id if staff else None,
+        conflict_declared=review.conflict_declared if staff else None,
+    )
+
+
+HISTORY_CURSOR_PREFIX = "m1"
+
+
+def encode_history_cursor(created_at: datetime, review_id: uuid.UUID) -> str:
+    """Cursor of the member history. The prefix keeps it from being accepted by another sort (Review.md 9.3)."""
+    raw = f"{HISTORY_CURSOR_PREFIX}|{created_at.isoformat()}|{review_id}".encode()
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_history_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode("utf-8")
+        prefix, timestamp, review_id = raw.split("|")
+        if prefix != HISTORY_CURSOR_PREFIX:
+            raise ValueError("cursor belongs to another listing")
+        moment = datetime.fromisoformat(timestamp)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        return moment, uuid.UUID(review_id)
+    except (ValueError, UnicodeDecodeError):
+        raise ReviewError("page cursor is not valid", "INVALID_CURSOR") from None
+
+
+def list_member_reviews(
+    session: Session,
+    author_id: uuid.UUID,
+    *,
+    status: ReviewStatus | None,
+    destination_id: uuid.UUID | None,
+    after: str | None,
+    limit: int,
+) -> tuple[list[ReviewSummary], str | None]:
+    """A member's own reviews, newest first, by the stable tuple ``(created_at, id)`` (Review.md 9.3)."""
+    statement = (
+        select(Review, ReviewRevision)
+        .join(ReviewRevision, ReviewRevision.id == Review.current_revision_id)
+        .where(Review.author_user_id == author_id)
+        .order_by(Review.created_at.desc(), Review.id.desc())
+        .limit(limit + 1)
+    )
+    if status is not None:
+        statement = statement.where(Review.status == status)
+    if destination_id is not None:
+        statement = statement.where(Review.destination_id == destination_id)
+    if after:
+        created_at, review_id = decode_history_cursor(after)
+        statement = statement.where(
+            or_(Review.created_at < created_at, and_(Review.created_at == created_at, Review.id < review_id))
+        )
+    rows = session.execute(statement).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    items = [
+        ReviewSummary(
+            id=review.id,
+            destination_id=review.destination_id,
+            status=review.status,
+            version=review.version,
+            overall_rating=review.overall_rating,
+            title=revision.title,
+            visit_month=review.visit_month,
+            created_at=review.created_at,
+            published_at=review.published_at,
+            appeal_deadline=rejection_details(session, review).appeal_deadline,
+        )
+        for review, revision in rows
+    ]
+    next_cursor = encode_history_cursor(rows[-1][0].created_at, rows[-1][0].id) if has_more and rows else None
+    return items, next_cursor

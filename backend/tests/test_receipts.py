@@ -268,6 +268,7 @@ def test_status_requires_the_right_receipt(api: Any) -> None:
         "published_at": None,
         "decision_reason": None,
         "appeal_deadline": None,
+        "appeal_state": None,
     }
 
     wrong = client.post(
