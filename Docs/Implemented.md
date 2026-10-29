@@ -14,14 +14,14 @@ Claims here are limited to what is in the repository and evidenced by a test, mi
 | Render deployment blueprint | Defined, not yet applied | `render.yaml`; requires dashboard setup and the Supabase URL. |
 | Pending-review edit endpoint (`PATCH /reviews/{id}/pending`) | Not implemented | Decided in Decisions.md; endpoint absent from `app/api.py`. |
 | Member reviews, accounts, verification, reports, appeals | Not implemented | Gantt R04, R07, R11. |
-| Production authentication, staff MFA, CSRF, rate limiting | Not implemented | Security.md deploy gates; staff API returns 501 in production. |
+| Production authentication, staff MFA, CSRF | Not implemented | Security.md deploy gates; staff API returns 501 in production. Rate limiting is implemented (WP5 row below). |
 | ERD (`Docs/Schema.md`) and API contract (`Docs/api/API.md`, `Docs/api/openapi-v1.json`) | Implemented, review pending | Contract and schema drift tests; sign-off in `Docs/Reviews/F02-review.md`. |
 | Row-level security on all public tables | Implemented | `migrations/versions/0002_enable_rls.py`; `tests/test_rls.py`. |
 | Destination profile, bilingual guide items, dated advisories (Current/Stale/Expired), public contacts, provenance; `GET /destinations`, `GET /destinations/{destination_id}` with public cache and ETag (R02) | Implemented | `migrations/versions/0003_destination_content.py`; `tests/test_destination_unit.py`, `test_destination_http.py`, `test_destination_postgres.py`; 70 backend tests pass on PostgreSQL 17 on 19 Oct 2026. Sourced seed content for the five destinations exists (see the R01/R03 section below); its R01 content review is pending. |
 | Public review feed cache header | Implemented | `tests/test_destination_postgres.py::test_review_feed_has_a_short_public_ttl`. |
 | Standard error body, bilingual messages, field-error codes (WP2) | Implemented | `tests/test_errors.py`. |
 | Client-generated receipts, versioned HMAC keyring with rotation, `POST /review-receipts/status`, idempotent withdraw (WP3) | Implemented | `tests/test_receipts.py`; migration `0004_receipt_keyring`. |
-| Trusted client address, durable rate limits, progressive receipt block, pending ceilings, emergency switch, server-side Turnstile (WP5) | Implemented, **staging proof outstanding** | `tests/test_client_address.py`, `test_turnstile.py`, `test_abuse.py`; migration `0005_rate_limit_buckets`. The forged-header test against the real Render edge and a live Turnstile key have not been run. 181 backend tests pass on PostgreSQL 17 on 19 Oct 2026. |
+| Trusted client address, durable rate limits, progressive receipt block, pending ceilings, emergency switch, server-side Turnstile (WP5) | Implemented, **staging proof outstanding** | `tests/test_client_address.py`, `test_turnstile.py`, `test_abuse.py`; migration `0005_rate_limit_buckets`. The forged-header test against the real Render edge and a live Turnstile key have not been run. Historical: 181 backend tests passed on PostgreSQL 17 on 19 Oct 2026; see the current CI run for present status. |
 | `Idempotency-Key` replay (WP4), edit-pending, appeals, reports (WP6, WP7), CSRF and credentialed CORS (WP9), authentication (WP10), pack manifest (WP11) | Not implemented | `Docs/api/API.md` section 4. |
 | Redis, CDN, media pipeline, offline pack API | Deferred | Decisions.md scope control; Gantt R14. |
 
