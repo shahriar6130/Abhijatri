@@ -74,7 +74,7 @@ class DecisionBody(_Body):
     task_id: uuid.UUID
     lease_token: uuid.UUID
     expected_version: int = Field(ge=1)
-    decision: str = Field(pattern="^(PUBLISH|REJECT|HIDE|RESTORE)$")
+    decision: str = Field(pattern="^(PUBLISH|REJECT|HIDE|RESTORE|REQUEST_CHANGES)$")
     reason_code: str = Field(min_length=2, max_length=60)
     note: str | None = Field(default=None, max_length=500)
     # PUBLISH only: photos or videos to reject while the review itself is published. The rest are approved.

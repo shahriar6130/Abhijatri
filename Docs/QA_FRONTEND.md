@@ -17,3 +17,12 @@
 ## What was done
 
 Installed the lockfile-defined dependencies, ran the production build and ran the test suite. No frontend source or lockfile was changed.
+
+## Resolution (28 October 2026)
+
+1. Resolved: the planner no longer calls `/api/v1/estimates`.
+2. Resolved: `npm audit` reports 0 vulnerabilities in `frontend`, `ops` and `staff` after the Vite 8 / Vitest 5 upgrade.
+3. Resolved: prototype data and slug ids are deleted.
+4. Open: browser E2E tests are still not in CI.
+
+Details: `Docs/Frontend-Implemented.md` section 5a.

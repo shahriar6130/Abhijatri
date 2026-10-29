@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Theme } from '../types';
+import { readStored, writeStored } from '../utils/safeStorage';
 
 interface ThemeContextType {
   theme: Theme;
@@ -11,12 +12,12 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem('abhijatri_theme');
+    const saved = readStored('abhijatri_theme');
     return (saved === 'dark' || saved === 'light') ? saved : 'light';
   });
 
   useEffect(() => {
-    localStorage.setItem('abhijatri_theme', theme);
+    writeStored('abhijatri_theme', theme);
     const root = document.documentElement;
     if (theme === 'dark') {
       root.classList.add('dark');

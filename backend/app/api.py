@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 from app import abuse, media, visits
 from app import review_parameters as rp
 from app.abuse import CounterSessions
+from app.admin import cases
+from app.auth import csrf
+from app.auth.sessions import MemberPrincipal, OptionalPrincipal, Principal
 from app.client_address import network_digest, trusted_client_address
 from app.config import get_settings
 from app.db import get_session
@@ -37,6 +40,8 @@ from app.schemas import (
     CategoryParameter,
     ChoiceOption,
     ConflictFlagRequest,
+    GuestAppealCreated,
+    GuestAppealRequest,
     GuestReviewCreate,
     GuestReviewCreated,
     GuestVisitRequest,
@@ -45,11 +50,15 @@ from app.schemas import (
     ModerationQueueItem,
     ModerationRequest,
     ModerationResult,
+    MyReviews,
     PublicReview,
     RatingParameter,
     RatingRules,
     ReceiptStatus,
     ReceiptStatusRequest,
+    ReviewDetail,
+    ReviewEdit,
+    ReviewEdited,
     ReviewFeed,
     ReviewParameters,
     TextParameter,
@@ -58,10 +67,14 @@ from app.schemas import (
 from app.services import (
     ReviewError,
     category_averages,
+    edit_pending_review,
     encode_cursor,
     find_recoverable_draft,
+    list_member_reviews,
     moderate_review,
     rejection_details,
+    review_appeal_state,
+    review_detail,
     revision_category_ratings,
     set_review_conflict,
     submit_guest_review,
@@ -462,6 +475,7 @@ def _receipt_status(session: Session, review: Review) -> ReceiptStatus:
         published_at=review.published_at,
         decision_reason=details.decision_reason,
         appeal_deadline=details.appeal_deadline,
+        appeal_state=review_appeal_state(session, review.id),
     )
 
 
@@ -497,6 +511,15 @@ def receipt_status(
     return result
 
 
+def _owner_session(request: Request, principal: Principal | None) -> Principal:
+    """A signed-in member acting on their own review: session and CSRF token, never a receipt."""
+    if principal is None:
+        raise ApiError("AUTH_REQUIRED")
+    csrf.check_origin(request)
+    csrf.require_valid(request, principal.csrf_binding)
+    return principal
+
+
 @router.post("/reviews/{review_id}/withdraw", response_model=ReceiptStatus)
 @limiter.limit(receipt_limit)
 def withdraw_guest_review(
@@ -504,8 +527,20 @@ def withdraw_guest_review(
     review_id: uuid.UUID,
     payload: WithdrawRequest,
     sessions: CounterSessions,
+    principal: OptionalPrincipal,
     session: Session = Depends(get_session),
 ) -> ReceiptStatus:
+    """A Guest sends the receipt; a signed-in member omits it and uses the session (API.md 5.4)."""
+    if payload.receipt_secret is None:
+        owner = _owner_session(request, principal)
+        try:
+            review = withdraw_review(session, review_id, payload.expected_version, author_id=owner.user.id)
+            result = _receipt_status(session, review)
+            session.commit()
+        except ReviewError as error:
+            session.rollback()
+            _raise_service_error(error)
+        return result
     receipt, network = _guard_receipt_operation(request, sessions, payload.receipt_secret)
     try:
         verify_receipt(session, review_id, payload.receipt_secret)
@@ -518,3 +553,106 @@ def withdraw_guest_review(
             abuse.record_receipt_failure(sessions, receipt, network)
         _raise_service_error(error)
     return result
+
+
+@router.patch("/reviews/{review_id}/pending", response_model=ReviewEdited)
+@limiter.limit(receipt_limit)
+def edit_unpublished_review(
+    request: Request,
+    review_id: uuid.UUID,
+    payload: ReviewEdit,
+    sessions: CounterSessions,
+    principal: OptionalPrincipal,
+    session: Session = Depends(get_session),
+) -> ReviewEdited:
+    """Edit a review that is still PENDING or CHANGES_REQUESTED as a new revision (API.md 5.5)."""
+    if payload.receipt_secret is None:
+        owner = _owner_session(request, principal)
+        try:
+            outcome = edit_pending_review(session, review_id, payload, author_id=owner.user.id)
+            session.commit()
+        except ReviewError as error:
+            session.rollback()
+            _raise_service_error(error)
+    else:
+        receipt, network = _guard_receipt_operation(request, sessions, payload.receipt_secret)
+        try:
+            verify_receipt(session, review_id, payload.receipt_secret)
+            outcome = edit_pending_review(session, review_id, payload)
+            session.commit()
+        except ReviewError as error:
+            session.rollback()
+            if error.code in _RECEIPT_FAILURE_CODES:
+                abuse.record_receipt_failure(sessions, receipt, network)
+            _raise_service_error(error)
+    return ReviewEdited(
+        review_id=outcome.review.id, status=outcome.review.status, version=outcome.review.version, revision=outcome.revision
+    )
+
+
+@router.post("/review-receipts/appeals", response_model=GuestAppealCreated, status_code=status.HTTP_201_CREATED)
+@limiter.limit(receipt_limit)
+def appeal_rejected_review(
+    request: Request,
+    payload: GuestAppealRequest,
+    sessions: CounterSessions,
+    session: Session = Depends(get_session),
+) -> GuestAppealCreated:
+    """A Guest appeals the rejection of their review with the receipt (API.md 5.6)."""
+    receipt, network = _guard_receipt_operation(request, sessions, payload.receipt_secret)
+    try:
+        verify_receipt(session, payload.review_id, payload.receipt_secret)
+        appeal = cases.create_guest_appeal(session, payload.review_id, statement=payload.statement)
+        session.commit()
+    except ReviewError as error:
+        session.rollback()
+        if error.code in _RECEIPT_FAILURE_CODES:
+            abuse.record_receipt_failure(sessions, receipt, network)
+        _raise_service_error(error)
+    except ApiError:
+        session.rollback()
+        raise
+    return GuestAppealCreated(appeal_id=appeal.id, status="OPEN", deadline_at=appeal.deadline_at)
+
+
+@router.get("/reviews/mine", response_model=MyReviews)
+def my_reviews(
+    response: Response,
+    principal: MemberPrincipal,
+    status_filter: ReviewStatus | None = Query(default=None, alias="status"),
+    destination_id: uuid.UUID | None = None,
+    after: str | None = Query(default=None, max_length=200),
+    limit: int = Query(default=20, ge=1, le=50),
+    session: Session = Depends(get_session),
+) -> MyReviews:
+    """The signed-in member's own reviews, newest first, with an opaque cursor (Review.md 9.3)."""
+    try:
+        items, next_cursor = list_member_reviews(
+            session, principal.user.id, status=status_filter, destination_id=destination_id, after=after, limit=limit
+        )
+    except ReviewError as error:
+        _raise_service_error(error)
+    response.headers["Cache-Control"] = "no-store"
+    return MyReviews(items=items, next_cursor=next_cursor)
+
+
+@router.get("/reviews/{review_id}", response_model=ReviewDetail)
+def get_review(
+    response: Response,
+    review_id: uuid.UUID,
+    principal: MemberPrincipal,
+    session: Session = Depends(get_session),
+) -> ReviewDetail:
+    """The owner's full view, or a moderator's. Anyone else sees 404, so existence is not disclosed."""
+    settings = get_settings()
+    staff = principal.role in ("moderator", "superadmin")
+    if staff and (principal.role == "superadmin" or settings.require_mfa_for_moderators) and not principal.claims.mfa_verified:
+        raise ApiError("MFA_REQUIRED")
+    review = session.get(Review, review_id)
+    if review is None or (not staff and review.author_user_id != principal.user.id):
+        raise ApiError("NOT_FOUND")
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return review_detail(session, review, staff=staff)
+    except ReviewError as error:
+        _raise_service_error(error)

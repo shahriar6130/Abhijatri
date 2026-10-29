@@ -25,6 +25,7 @@ export function problemMessage(field: 'email' | 'password' | 'display_name', pro
       if (problem === 'REQUIRED') return t('পাসওয়ার্ড দিন।', 'Enter a password.');
       if (problem === 'TOO_SHORT') return t('কমপক্ষে ১০ অক্ষর দিন।', 'Use at least 10 characters.');
       if (problem === 'TOO_LONG') return t('পাসওয়ার্ড ১২৮ অক্ষরের বেশি হতে পারবে না।', 'A password can be at most 128 characters.');
+      if (problem === 'SAME_PASSWORD') return t('নতুন পাসওয়ার্ড বর্তমানটির থেকে আলাদা হতে হবে।', 'The new password must be different from your current one.');
       return t('অন্তত একটি অক্ষর ও একটি সংখ্যা থাকতে হবে।', 'Include at least one letter and one number.');
     default:
       return problem === 'REQUIRED' ? t('আপনার নাম দিন।', 'Enter your name.') : t('নাম ৮০ অক্ষরের বেশি হতে পারবে না।', 'A name can be at most 80 characters.');

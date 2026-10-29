@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app import review_parameters as rp
 from app.config import get_settings
@@ -24,6 +24,16 @@ class StrictRequestModel(BaseModel):
 
 
 CategoryScore = Annotated[int, Field(ge=rp.RATING_MIN, le=rp.RATING_MAX)]
+
+
+def check_visit_month(value: date) -> date:
+    if value.day != 1:
+        raise ValueError("visit_month must use the first day of its month")
+    display_tz = get_settings().display_tz
+    current_month = datetime.now(display_tz).date().replace(day=1)
+    if value > current_month:
+        raise ValueError(f"visit_month cannot be in the future in {display_tz.key}")
+    return value
 
 
 class ReviewContent(StrictRequestModel):
@@ -54,13 +64,7 @@ class ReviewContent(StrictRequestModel):
     @field_validator("visit_month")
     @classmethod
     def first_day_of_month(cls, value: date) -> date:
-        if value.day != 1:
-            raise ValueError("visit_month must use the first day of its month")
-        display_tz = get_settings().display_tz
-        current_month = datetime.now(display_tz).date().replace(day=1)
-        if value > current_month:
-            raise ValueError(f"visit_month cannot be in the future in {display_tz.key}")
-        return value
+        return check_visit_month(value)
 
 
 class GuestReviewCreate(ReviewContent):
@@ -82,7 +86,7 @@ class GuestReviewCreated(BaseModel):
 
 class ModerationRequest(StrictRequestModel):
     expected_version: int = Field(ge=1)
-    decision: Literal["PUBLISH", "REJECT", "HIDE", "RESTORE"]
+    decision: Literal["PUBLISH", "REJECT", "HIDE", "RESTORE", "REQUEST_CHANGES"]
     reason_code: str = Field(min_length=2, max_length=60)
     note: str | None = Field(default=None, max_length=500)
 
@@ -126,11 +130,132 @@ class ReceiptStatus(BaseModel):
     published_at: datetime | None
     decision_reason: str | None
     appeal_deadline: datetime | None
+    # State of the appeal against the rejection (received, in_review, upheld, overturned), else null.
+    appeal_state: str | None = None
 
 
 class WithdrawRequest(StrictRequestModel):
     expected_version: int = Field(ge=1)
+    # A Guest proves ownership with the receipt; a signed-in member omits it and uses the session.
+    receipt_secret: str | None = Field(default=None, min_length=1, max_length=100, repr=False)
+
+
+class ReviewEdit(StrictRequestModel):
+    """Changes to an unpublished review (API.md 5.5). Omitted fields keep their current value;
+    a sent ``category_ratings`` replaces the whole set and ``{}`` clears it. The destination,
+    the draft id and the receipt cannot change."""
+
+    expected_version: int = Field(ge=1)
+    # A Guest proves ownership with the receipt; a signed-in member omits it and uses the session.
+    receipt_secret: str | None = Field(default=None, min_length=1, max_length=100, repr=False)
+    language: ReviewLanguage | None = None
+    traveller_type: TravellerType | None = None
+    comfort_tier: ComfortTier | None = None
+    visit_month: date | None = None
+    title: str | None = Field(default=None, min_length=rp.TITLE_MIN, max_length=rp.TITLE_MAX)
+    body: str | None = Field(default=None, min_length=rp.NOTE_MIN, max_length=rp.NOTE_MAX)
+    overall_rating: int | None = Field(default=None, ge=rp.RATING_MIN, le=rp.RATING_MAX)
+    category_ratings: dict[ReviewCategory, CategoryScore] | None = Field(default=None, max_length=7)
+    consent_version: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @field_validator("visit_month")
+    @classmethod
+    def first_day_of_month(cls, value: date | None) -> date | None:
+        return None if value is None else check_visit_month(value)
+
+    @model_validator(mode="after")
+    def something_changes(self) -> "ReviewEdit":
+        content = self.model_dump(exclude={"expected_version", "receipt_secret"}, exclude_unset=True)
+        if not content:
+            raise ValueError("at least one field to change is required")
+        if any(value is None for key, value in content.items() if key != "category_ratings"):
+            raise ValueError("a field cannot be set to null; omit it to keep its value")
+        return self
+
+
+class ReviewEdited(BaseModel):
+    review_id: uuid.UUID
+    status: ReviewStatus
+    version: int
+    revision: int
+
+
+class GuestAppealRequest(StrictRequestModel):
+    review_id: uuid.UUID
     receipt_secret: str = Field(min_length=1, max_length=100, repr=False)
+    statement: str = Field(min_length=20, max_length=2000)
+
+
+class GuestAppealCreated(BaseModel):
+    appeal_id: uuid.UUID
+    status: Literal["OPEN"]
+    deadline_at: datetime
+
+
+class RevisionInfo(BaseModel):
+    sequence: int
+    status: str
+    created_at: datetime
+
+
+class OwnerMedia(BaseModel):
+    id: uuid.UUID
+    kind: Literal["image", "video"]
+    state: str
+    alt_text: str
+    caption: str | None = None
+
+
+class ReviewSummary(BaseModel):
+    """One row of a member's own history."""
+
+    id: uuid.UUID
+    destination_id: uuid.UUID
+    status: ReviewStatus
+    version: int
+    overall_rating: int
+    title: str
+    visit_month: date
+    created_at: datetime
+    published_at: datetime | None
+    appeal_deadline: datetime | None
+
+
+class MyReviews(BaseModel):
+    items: list[ReviewSummary]
+    next_cursor: str | None
+
+
+class ReviewDetail(BaseModel):
+    """The owner's (or a moderator's) full view of one review. Never cached."""
+
+    id: uuid.UUID
+    destination_id: uuid.UUID
+    author_type: Literal["GUEST", "MEMBER"]
+    status: ReviewStatus
+    version: int
+    rating_eligibility: str
+    language: ReviewLanguage
+    traveller_type: TravellerType
+    comfort_tier: ComfortTier
+    visit_month: date
+    title: str
+    body: str
+    overall_rating: int
+    category_ratings: dict[ReviewCategory, int] = Field(default_factory=dict)
+    consent_version: str
+    created_at: datetime
+    published_at: datetime | None
+    withdrawn_at: datetime | None
+    decision_reason: str | None
+    appeal_deadline: datetime | None
+    appeal_state: str | None
+    revisions: list[RevisionInfo]
+    media: list[OwnerMedia] = Field(default_factory=list)
+    # Staff only; null for the owner.
+    guest_display_name: str | None = None
+    author_user_id: uuid.UUID | None = None
+    conflict_declared: bool | None = None
 
 
 class PublicReview(BaseModel):

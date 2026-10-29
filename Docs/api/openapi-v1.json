@@ -210,7 +210,7 @@
         "additionalProperties": false,
         "properties": {
           "decision": {
-            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE)$",
+            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE|REQUEST_CHANGES)$",
             "title": "Decision",
             "type": "string"
           },
@@ -586,7 +586,7 @@
         "additionalProperties": false,
         "properties": {
           "decision": {
-            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE)$",
+            "pattern": "^(PUBLISH|REJECT|HIDE|RESTORE|REQUEST_CHANGES)$",
             "title": "Decision",
             "type": "string"
           },
@@ -1207,6 +1207,61 @@
           "size_bytes"
         ],
         "title": "EvidenceBody",
+        "type": "object"
+      },
+      "GuestAppealCreated": {
+        "properties": {
+          "appeal_id": {
+            "format": "uuid",
+            "title": "Appeal Id",
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "status": {
+            "const": "OPEN",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "appeal_id",
+          "status",
+          "deadline_at"
+        ],
+        "title": "GuestAppealCreated",
+        "type": "object"
+      },
+      "GuestAppealRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "receipt_secret": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Receipt Secret",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "statement": {
+            "maxLength": 2000,
+            "minLength": 20,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "receipt_secret",
+          "statement"
+        ],
+        "title": "GuestAppealRequest",
         "type": "object"
       },
       "GuestFeedbackSummary": {
@@ -1942,7 +1997,8 @@
               "PUBLISH",
               "REJECT",
               "HIDE",
-              "RESTORE"
+              "RESTORE",
+              "REQUEST_CHANGES"
             ],
             "title": "Decision",
             "type": "string"
@@ -2014,6 +2070,34 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "MyReviews": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MyReviews",
+        "type": "object"
+      },
       "NotificationPatch": {
         "additionalProperties": false,
         "properties": {
@@ -2041,6 +2125,50 @@
           }
         },
         "title": "NotificationPatch",
+        "type": "object"
+      },
+      "OwnerMedia": {
+        "properties": {
+          "alt_text": {
+            "title": "Alt Text",
+            "type": "string"
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "image",
+              "video"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "alt_text"
+        ],
+        "title": "OwnerMedia",
         "type": "object"
       },
       "PreferencesBody": {
@@ -2396,6 +2524,17 @@
             ],
             "title": "Appeal Deadline"
           },
+          "appeal_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appeal State"
+          },
           "decision_reason": {
             "anyOf": [
               {
@@ -2667,6 +2806,387 @@
         "title": "ReviewCategory",
         "type": "string"
       },
+      "ReviewDetail": {
+        "description": "The owner's (or a moderator's) full view of one review. Never cached.",
+        "properties": {
+          "appeal_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appeal Deadline"
+          },
+          "appeal_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appeal State"
+          },
+          "author_type": {
+            "enum": [
+              "GUEST",
+              "MEMBER"
+            ],
+            "title": "Author Type",
+            "type": "string"
+          },
+          "author_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author User Id"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "category_ratings": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ReviewCategory"
+            },
+            "title": "Category Ratings",
+            "type": "object"
+          },
+          "comfort_tier": {
+            "$ref": "#/components/schemas/ComfortTier"
+          },
+          "conflict_declared": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Declared"
+          },
+          "consent_version": {
+            "title": "Consent Version",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "destination_id": {
+            "format": "uuid",
+            "title": "Destination Id",
+            "type": "string"
+          },
+          "guest_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Display Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/ReviewLanguage"
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerMedia"
+            },
+            "title": "Media",
+            "type": "array"
+          },
+          "overall_rating": {
+            "title": "Overall Rating",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "rating_eligibility": {
+            "title": "Rating Eligibility",
+            "type": "string"
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionInfo"
+            },
+            "title": "Revisions",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "traveller_type": {
+            "$ref": "#/components/schemas/TravellerType"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "visit_month": {
+            "format": "date",
+            "title": "Visit Month",
+            "type": "string"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
+          }
+        },
+        "required": [
+          "id",
+          "destination_id",
+          "author_type",
+          "status",
+          "version",
+          "rating_eligibility",
+          "language",
+          "traveller_type",
+          "comfort_tier",
+          "visit_month",
+          "title",
+          "body",
+          "overall_rating",
+          "consent_version",
+          "created_at",
+          "published_at",
+          "withdrawn_at",
+          "decision_reason",
+          "appeal_deadline",
+          "appeal_state",
+          "revisions"
+        ],
+        "title": "ReviewDetail",
+        "type": "object"
+      },
+      "ReviewEdit": {
+        "additionalProperties": false,
+        "description": "Changes to an unpublished review (API.md 5.5). Omitted fields keep their current value;\na sent ``category_ratings`` replaces the whole set and ``{}`` clears it. The destination,\nthe draft id and the receipt cannot change.",
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "maxLength": 6000,
+                "minLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "category_ratings": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maximum": 5.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "maxProperties": 7,
+                "propertyNames": {
+                  "$ref": "#/components/schemas/ReviewCategory"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Ratings"
+          },
+          "comfort_tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComfortTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consent_version": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Version"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLanguage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overall_rating": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overall Rating"
+          },
+          "receipt_secret": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Secret"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "traveller_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TravellerType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visit_month": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visit Month"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "ReviewEdit",
+        "type": "object"
+      },
+      "ReviewEdited": {
+        "properties": {
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "review_id",
+          "status",
+          "version",
+          "revision"
+        ],
+        "title": "ReviewEdited",
+        "type": "object"
+      },
       "ReviewFeed": {
         "properties": {
           "guest_category_averages": {
@@ -2807,6 +3327,108 @@
         ],
         "title": "ReviewStatus",
         "type": "string"
+      },
+      "ReviewSummary": {
+        "description": "One row of a member's own history.",
+        "properties": {
+          "appeal_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appeal Deadline"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "destination_id": {
+            "format": "uuid",
+            "title": "Destination Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "overall_rating": {
+            "title": "Overall Rating",
+            "type": "integer"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "visit_month": {
+            "format": "date",
+            "title": "Visit Month",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "destination_id",
+          "status",
+          "version",
+          "overall_rating",
+          "title",
+          "visit_month",
+          "created_at",
+          "published_at",
+          "appeal_deadline"
+        ],
+        "title": "ReviewSummary",
+        "type": "object"
+      },
+      "RevisionInfo": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "status",
+          "created_at"
+        ],
+        "title": "RevisionInfo",
+        "type": "object"
       },
       "RoleBody": {
         "additionalProperties": false,
@@ -3183,15 +3805,21 @@
             "type": "integer"
           },
           "receipt_secret": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Receipt Secret",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Secret"
           }
         },
         "required": [
-          "expected_version",
-          "receipt_secret"
+          "expected_version"
         ],
         "title": "WithdrawRequest",
         "type": "object"
@@ -6542,6 +7170,45 @@
         "summary": "Review Parameters"
       }
     },
+    "/api/v1/review-receipts/appeals": {
+      "post": {
+        "description": "A Guest appeals the rejection of their review with the receipt (API.md 5.6).",
+        "operationId": "appeal_rejected_review_api_v1_review_receipts_appeals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestAppealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestAppealCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Appeal Rejected Review"
+      }
+    },
     "/api/v1/review-receipts/status": {
       "post": {
         "operationId": "receipt_status_api_v1_review_receipts_status_post",
@@ -6659,6 +7326,140 @@
         "tags": [
           "members"
         ]
+      }
+    },
+    "/api/v1/reviews/mine": {
+      "get": {
+        "description": "The signed-in member's own reviews, newest first, with an opaque cursor (Review.md 9.3).",
+        "operationId": "my_reviews_api_v1_reviews_mine_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "destination_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyReviews"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Reviews"
+      }
+    },
+    "/api/v1/reviews/{review_id}": {
+      "get": {
+        "description": "The owner's full view, or a moderator's. Anyone else sees 404, so existence is not disclosed.",
+        "operationId": "get_review_api_v1_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Review"
       }
     },
     "/api/v1/reviews/{review_id}/media-intents": {
@@ -6815,6 +7616,57 @@
         ]
       }
     },
+    "/api/v1/reviews/{review_id}/pending": {
+      "patch": {
+        "description": "Edit a review that is still PENDING or CHANGES_REQUESTED as a new revision (API.md 5.5).",
+        "operationId": "edit_unpublished_review_api_v1_reviews__review_id__pending_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewEdited"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Unpublished Review"
+      }
+    },
     "/api/v1/reviews/{review_id}/reports": {
       "post": {
         "description": "A signed-in member reports a published review (API.md 4.4).",
@@ -6873,6 +7725,7 @@
     },
     "/api/v1/reviews/{review_id}/withdraw": {
       "post": {
+        "description": "A Guest sends the receipt; a signed-in member omits it and uses the session (API.md 5.4).",
         "operationId": "withdraw_guest_review_api_v1_reviews__review_id__withdraw_post",
         "parameters": [
           {

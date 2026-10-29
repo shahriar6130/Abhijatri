@@ -146,6 +146,8 @@ class FakeGoTrue:
         claims = tokens.verify_access_token(access_token)
         for user in self.users.values():
             if user["id"] == claims.user_id:
+                if user["password"] == new_password:
+                    raise GoTrueError(422, "same_password")  # what Supabase answers
                 user["password"] = new_password
 
     def list_factors(self, access_token: str) -> list[dict[str, Any]]:
@@ -504,6 +506,16 @@ def test_reset_confirm_checks_the_password_before_spending_the_link(client: Test
         "/api/v1/auth/password-reset/confirm", json={"token_hash": "reset-link-token-1", "new_password": "AnotherPass123"}
     )
     assert again.status_code == 422 and again.json()["error"]["code"] == "TOKEN_INVALID_OR_EXPIRED"
+
+
+
+@pytest.mark.integration
+def test_reset_to_the_same_password_says_so(client: TestClient, fake: FakeGoTrue) -> None:
+    fake.add_user("rafi@example.com")
+    fake.verify_tokens["reset-link-token-2"] = ("rafi@example.com", "recovery")
+    same = client.post("/api/v1/auth/password-reset/confirm", json={"token_hash": "reset-link-token-2", "new_password": PASSWORD})
+    assert same.status_code == 422
+    assert same.json()["error"]["field_errors"] == [{"field": "password", "code": "SAME_PASSWORD"}]
 
 
 # ---- visits ----

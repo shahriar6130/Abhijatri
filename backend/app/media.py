@@ -236,7 +236,7 @@ def _own_pending_review(session: Session, principal: Principal, review_id: uuid.
     review = session.scalar(select(Review).where(Review.id == review_id).with_for_update())
     if review is None or review.author_user_id != principal.user.id:
         raise ApiError("NOT_FOUND")  # another person's review is not disclosed
-    if review.status != ReviewStatus.PENDING:
+    if review.status not in (ReviewStatus.PENDING, ReviewStatus.CHANGES_REQUESTED):
         raise ApiError("TRANSITION_NOT_ALLOWED")  # media can be added only before the moderator decides
     return review
 

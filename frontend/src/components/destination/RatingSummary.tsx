@@ -42,7 +42,10 @@ export const RatingSummary: React.FC<{ community: Rating; guest: Rating; compact
           <ShieldCheck size={13} aria-hidden="true" />
           {t('কমিউনিটি রেটিং', 'Community Rating')} {formatNumber(score, language, 1)}
           <span className="opacity-75">
-            ({formatNumber(community.count, language)} {t('যাচাইকৃত', 'verified')})
+            {t(
+              `(${formatNumber(community.count, language)}টি যাচাইকৃত রিভিউ)`,
+              `(${community.count} verified review${community.count === 1 ? '' : 's'})`,
+            )}
           </span>
         </span>
       ) : (
@@ -54,7 +57,8 @@ export const RatingSummary: React.FC<{ community: Rating; guest: Rating; compact
           )}
         >
           <ShieldCheck size={13} aria-hidden="true" />
-          {t('সম্পাদকীয় সীডেড নির্বাচন', 'Editorial seeded selection')}
+          {/* Review.md 6.4 term; it is editorial, not a community ranking. */}
+          {t('সম্পাদকীয় গন্তব্য নির্বাচন', 'Seeded Destination Selection')}
         </span>
       )}
 
@@ -65,7 +69,12 @@ export const RatingSummary: React.FC<{ community: Rating; guest: Rating; compact
           <>
             <Star size={12} className="fill-amber-400 text-amber-400" aria-hidden="true" />
             {formatNumber(guest.average, language, 1)}
-            <span className="opacity-75">({formatNumber(guest.count, language)})</span>
+            <span className="opacity-75">
+              {t(
+                `(${formatNumber(guest.count, language)}টি রিভিউ)`,
+                `(${guest.count} review${guest.count === 1 ? '' : 's'})`,
+              )}
+            </span>
           </>
         ) : (
           <span className="opacity-75">{t('এখনো নেই', 'none yet')}</span>

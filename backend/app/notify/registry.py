@@ -20,6 +20,7 @@ from dataclasses import dataclass
 PRIORITIES = ("critical", "high", "normal", "low")
 RESOLVERS = ("payload_user", "captured_staff")
 ROUTES = (
+    "/account",
     "/account/appeals",
     "/account/verification",
     "/account/notifications",
@@ -62,6 +63,7 @@ APPEAL_HINT = ("৩০ দিনের মধ্যে আপিল করতে
 TEMPLATES: dict[str, Template] = {
     # ---- members: content ----
     "content.published": Template("আপনার রিভিউ প্রকাশিত হয়েছে", "Your review is published", "মডারেটর আপনার রিভিউ প্রকাশ করেছেন।", "A moderator published your review."),
+    "content.changes_requested": Template("আপনার রিভিউতে পরিবর্তন দরকার", "Your review needs changes", "মডারেটর রিভিউটি ফেরত পাঠিয়েছেন। সম্পাদনা করে আবার জমা দিন।", "A moderator sent your review back. Edit it and it returns to the queue."),
     "content.rejected": Template("আপনার রিভিউ প্রকাশ করা হয়নি", "Your review was not published", f"রিভিউটি নীতিমালার সাথে মেলেনি। {APPEAL_HINT[0]}", f"The review did not meet the policy. {APPEAL_HINT[1]}"),
     "content.hidden": Template("আপনার রিভিউ লুকানো হয়েছে", "Your review was hidden", f"রিভিউটি এখন জনসমক্ষে দেখা যাচ্ছে না। {APPEAL_HINT[0]}", f"The review is no longer public. {APPEAL_HINT[1]}"),
     "content.taken_down": Template("আপনার রিভিউ সরিয়ে নেওয়া হয়েছে", "Your review was taken down", f"নীতিমালা অনুযায়ী রিভিউটি সরানো হয়েছে। {APPEAL_HINT[0]}", f"The review was taken down under the policy. {APPEAL_HINT[1]}"),
@@ -112,6 +114,7 @@ SUPERADMIN = "superadmin"
 RULES: tuple[Rule, ...] = (
     # content decisions (review.state_changed carries the decision and the author)
     Rule("review.state_changed", "content.published", "payload_user", "author_id", "normal", route="/destinations/{destination_id}", when=_when(decision="PUBLISH")),
+    Rule("review.state_changed", "content.changes_requested", "payload_user", "author_id", "high", route="/account", when=_when(decision="REQUEST_CHANGES")),
     Rule("review.state_changed", "content.rejected", "payload_user", "author_id", "critical", route="/account/appeals", when=_when(decision="REJECT")),
     Rule("review.state_changed", "content.hidden", "payload_user", "author_id", "critical", route="/account/appeals", when=_when(decision="HIDE")),
     Rule("review.state_changed", "content.restored", "payload_user", "author_id", "normal", route="/destinations/{destination_id}", when=_when(decision="RESTORE")),

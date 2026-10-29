@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Search, Activity, Menu, X, Compass } from 'lucide-react';
+import { Activity, Menu, X, Compass } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { checkBackendHealth } from '../../api/health';
 import { PreferenceToggles } from './PreferenceToggles';
@@ -35,27 +35,21 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
         <div className="flex items-center gap-3">
           <button
             onClick={onToggleSidebar}
-            className="p-2 rounded-xl text-on-surface hover:bg-surface-sage dark:hover:bg-dark-surface-1 lg:hidden transition-colors"
-            aria-label="Toggle Navigation"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-on-surface hover:bg-surface-sage dark:hover:bg-dark-surface-1 lg:hidden transition-colors"
+            aria-label={isSidebarOpen ? t('মেনু বন্ধ করুন', 'Close menu') : t('মেনু খুলুন', 'Open menu')}
+            aria-expanded={Boolean(isSidebarOpen)}
           >
-            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            {isSidebarOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
           </button>
 
           <div className="flex items-center gap-2 lg:hidden">
-            <Compass className="text-forest-primary dark:text-neon-lime" size={24} />
+            <Compass className="text-forest-primary dark:text-neon-lime" size={24} aria-hidden="true" />
             <span className="font-title font-bold text-lg text-forest-primary dark:text-neon-lime">
               অভিযাত্রী
             </span>
           </div>
 
-          <div className="hidden sm:flex relative items-center w-64 lg:w-80">
-            <Search className="absolute left-3.5 text-on-surface-variant/70 dark:text-on-dark-muted" size={17} />
-            <input
-              type="text"
-              placeholder={t('গন্তব্য, রুট বা এলাকা খুঁজুন...', 'Search destinations, trails, costs...')}
-              className="w-full pl-10 pr-4 py-1.5 text-sm rounded-full bg-surface-sage/50 dark:bg-dark-surface-1 border border-surface-muted/40 dark:border-dark-surface-2 text-on-surface dark:text-on-dark placeholder:text-on-surface-variant/60 dark:placeholder:text-on-dark-muted focus:outline-none focus:ring-1 focus:ring-forest-primary dark:focus:ring-neon-lime transition-all"
-            />
-          </div>
+          {/* Global search returns when it is wired to an API (UI-Architecture U10); the destination list has its own filter. */}
         </div>
 
         {/* Right: Actions */}
@@ -63,12 +57,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
           {/* Backend API Health Pill */}
           <Link
             to="/health"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container dark:bg-dark-surface-2 text-xs hover:opacity-90 transition-opacity"
-            title={t('ব্যাকএন্ড হেলথ চেক', 'Check Backend Health')}
+            className="flex items-center gap-1.5 px-3 min-h-[44px] rounded-full bg-surface-container dark:bg-dark-surface-2 text-xs hover:opacity-90 transition-opacity"
+            aria-label={
+              apiOnline === true
+                ? t('সার্ভার চালু আছে: সিস্টেম স্ট্যাটাস দেখুন', 'Server online: open system status')
+                : apiOnline === false
+                  ? t('সার্ভারে সংযোগ নেই: সিস্টেম স্ট্যাটাস দেখুন', 'Server unreachable: open system status')
+                  : t('সার্ভার যাচাই হচ্ছে: সিস্টেম স্ট্যাটাস দেখুন', 'Checking the server: open system status')
+            }
           >
             <span className="relative flex h-2 w-2">
               <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                className={`motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
                   apiOnline === true ? 'bg-emerald-accent' : apiOnline === false ? 'bg-error-alert' : 'bg-accent-green'
                 }`}
               ></span>
@@ -78,9 +78,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
                 }`}
               ></span>
             </span>
-            <Activity size={13} className="text-on-surface-variant dark:text-on-dark-muted" />
-            <span className="font-en text-[11px] font-medium hidden sm:inline">
-              {apiOnline === true ? 'API Live' : apiOnline === false ? 'API Offline' : 'Checking'}
+            <Activity size={13} className="text-on-surface-variant dark:text-on-dark-muted" aria-hidden="true" />
+            <span className="text-[11px] font-medium hidden sm:inline" aria-hidden="true">
+              {apiOnline === true
+                ? t('সার্ভার চালু', 'Online')
+                : apiOnline === false
+                  ? t('সংযোগ নেই', 'Offline')
+                  : t('যাচাই হচ্ছে', 'Checking')}
             </span>
           </Link>
 

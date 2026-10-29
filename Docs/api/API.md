@@ -144,8 +144,8 @@ Retryable writes accept `Idempotency-Key: <UUID>` (PF 12.4).
 | `POST /reviews/guest` | guest scope + receipt + Turnstile | no-store | Change required: only `Idempotency-Key` replay (order-of-checks step 3, WP4) is pending. Client receipt, `201`/`200`, `409`, Turnstile, durable limits, ceilings and the emergency switch are done (WP3, WP5). |
 | `POST /review-receipts/status` | receipt | no-store | Implemented (WP3). Replaced the legacy `POST /review-receipts/exchange`, which is removed. |
 | `POST /reviews/{review_id}/withdraw` | receipt | no-store | Implemented (WP3, WP5 receipt limits). Idempotency-Key replay is added with WP4. |
-| `PATCH /reviews/{review_id}/pending` | receipt or owner | no-store | Planned (R07) |
-| `POST /review-receipts/appeals` | receipt | no-store | Planned (R07) |
+| `PATCH /reviews/{review_id}/pending` | receipt or owner | no-store | Implemented 29 Oct 2026 (R07, section 5.5) |
+| `POST /review-receipts/appeals` | receipt | no-store | Implemented 29 Oct 2026 (R07, section 5.6) |
 
 ### 4.3 Public reads
 
@@ -172,8 +172,9 @@ Public responses vary by `Accept-Language` and are purged on moderation or delet
 | Method and path | Credential | Cache | Status |
 |---|---|---|---|
 | `POST /auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/logout`, `/auth/password-reset/request`, `/auth/password-reset/confirm`, `GET /auth/session`, `POST /auth/mfa/enroll`, `/auth/mfa/verify`, `/auth/reauth` | none or member | no-store | Implemented 27 Oct 2026 (R04, section 5.17) |
-| `POST /reviews/member` | member | no-store | Planned (R07) |
-| `GET /reviews/{review_id}` | owner or staff | no-store | Planned (R07) |
+| `POST /reviews/member` | member | no-store | Implemented 27 Oct 2026 (section 5.20) |
+| `GET /reviews/mine` | member | no-store | Implemented 29 Oct 2026 (R07, section 5.5a) |
+| `GET /reviews/{review_id}` | owner or staff | no-store | Implemented 29 Oct 2026 (R07, section 5.5a) |
 | `POST /verifications` | member | no-store | Planned (R04) |
 
 ### 4.6 Staff
@@ -277,9 +278,12 @@ Response `200`:
   "version": 2,
   "published_at": null,
   "decision_reason": "PERSONAL_INFORMATION",
-  "appeal_deadline": "2026-11-17T08:30:00Z"
+  "appeal_deadline": "2026-11-17T17:59:59Z",
+  "appeal_state": null
 }
 ```
+
+`appeal_state` is `null`, `received`, `in_review`, `upheld` or `overturned`.
 
 `decision_reason` is the public-safe reason code and `appeal_deadline` is 30 days after rejection. Both are `null` unless the review was rejected (RV 4.2). A wrong receipt returns `404 RECEIPT_NOT_FOUND`.
 
@@ -289,7 +293,7 @@ Response `200`:
 { "receipt_secret": "abr1_...", "expected_version": 2 }
 ```
 
-Response `200`: the same body as 5.3. Withdrawal removes the review from public view and its rating contribution in one transaction.
+Response `200`: the same body as 5.3. Withdrawal removes the review from public view and its rating contribution in one transaction. A signed-in member omits `receipt_secret` and uses their session and CSRF token; another person's review answers `404 NOT_FOUND`.
 
 Withdrawal is idempotent. If the review is already `WITHDRAWN` or `DELETED`, the server returns `200` with the current state **before** checking `expected_version`, so a retry after a lost response succeeds.
 
@@ -308,7 +312,19 @@ Allowed only while the review is `PENDING` or `CHANGES_REQUESTED` (RV 4.2, 5.2).
 }
 ```
 
-Response `200`: `{ "review_id": "...", "status": "PENDING", "version": 3 }`. A member owner sends no `receipt_secret` and uses their session instead. Any other state returns `409 INVALID_TRANSITION`.
+Every content field is optional (`language`, `traveller_type`, `comfort_tier`, `visit_month`, `title`, `body`, `overall_rating`, `category_ratings`, `consent_version`); at least one is required, and `null` is refused (omit a field to keep it). `category_ratings`, when sent, replaces the whole set and `{}` clears it. The destination cannot change. Unknown fields return 422.
+
+Response `200`: `{ "review_id": "...", "status": "PENDING", "version": 3, "revision": 2 }`. The previous revision becomes `SUPERSEDED`, the review returns to the moderation queue and nothing is counted. A member owner sends no `receipt_secret` and uses their session and CSRF token instead; another person's review answers `404 NOT_FOUND`. Any state other than `PENDING` or `CHANGES_REQUESTED` returns `409 INVALID_TRANSITION`; a stale `expected_version` returns `409 REVIEW_VERSION_CONFLICT`; moving a member review onto a month they already reviewed returns `409 MEMBER_REVIEW_EXISTS`. A wrong receipt returns `404 RECEIPT_NOT_FOUND` and counts toward the progressive block.
+
+`CHANGES_REQUESTED` is reached when a moderator decides `REQUEST_CHANGES` (Section 5.10); the receipt status then shows the public-safe `decision_reason`.
+
+### 5.5a Owner reads: `GET /reviews/{review_id}` and `GET /reviews/mine`
+
+Both need a member session and answer `Cache-Control: no-store`.
+
+`GET /reviews/{review_id}` is for the review's author or a moderator; anyone else gets `404 NOT_FOUND`. It returns the current revision (`language`, `traveller_type`, `comfort_tier`, `title`, `body`, `overall_rating`, `category_ratings`, `consent_version`), `status`, `version`, `rating_eligibility`, `visit_month`, `created_at`, `published_at`, `withdrawn_at`, `decision_reason`, `appeal_deadline`, `appeal_state`, the `revisions` history (`sequence`, `status`, `created_at`) and the review's `media` (`id`, `kind`, `state`, `alt_text`, `caption`). Moderators also get `guest_display_name`, `author_user_id` and `conflict_declared`; authors get them as `null`.
+
+`GET /reviews/mine?status=&destination_id=&after=&limit=` lists the signed-in member's own reviews, newest first by the stable tuple `(created_at, id)`. `limit` defaults to 20 (maximum 50). `after` is the opaque `next_cursor` of the previous page; a cursor from another listing returns `422 INVALID_CURSOR`. Response: `{ "items": [{ "id", "destination_id", "status", "version", "overall_rating", "title", "visit_month", "created_at", "published_at", "appeal_deadline" }], "next_cursor": "..." | null }`.
 
 ### 5.6 `POST /review-receipts/appeals`
 
@@ -316,7 +332,7 @@ Response `200`: `{ "review_id": "...", "status": "PENDING", "version": 3 }`. A m
 { "review_id": "...", "receipt_secret": "abr1_...", "statement": "Plain text, 20 to 2000 characters." }
 ```
 
-Response `201`: `{ "appeal_id": "...", "status": "OPEN" }`. Only for a `REJECTED` review within its appeal window; otherwise `409 APPEAL_WINDOW_CLOSED`.
+Response `201`: `{ "appeal_id": "...", "status": "OPEN", "deadline_at": "..." }`. Only for a `REJECTED` review within its appeal window (the end of the 30th day after the rejection in Asia/Dhaka); otherwise `409 APPEAL_WINDOW_CLOSED`. A second appeal against the same decision returns `409 DUPLICATE_APPEAL`. The appeal joins the staff appeal queue and is decided by a moderator other than the one who rejected the review. The outcome appears as `appeal_state` in the receipt status (5.3); an overturned rejection returns the review to `PENDING`.
 
 ### 5.7 Reports and removal requests
 
