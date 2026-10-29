@@ -83,7 +83,9 @@ def purge_expired_buckets(session: Session, *, now: datetime | None = None) -> i
 def _maybe_purge(session: Session, now: datetime) -> None:
     global _last_purge  # noqa: PLW0603
     with _purge_lock:
-        if time.monotonic() - _last_purge < 60:
+        # 0.0 means "never purged". Comparing against it directly would skip the purge for the first
+        # minute after the machine boots, because time.monotonic() starts near zero there.
+        if _last_purge and time.monotonic() - _last_purge < 60:
             return
         _last_purge = time.monotonic()
     purge_expired_buckets(session, now=now)
