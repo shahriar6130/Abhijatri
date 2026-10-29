@@ -203,29 +203,29 @@ Section 4 changes three things that `Design.md` states, and that file is updated
 - Destination packs (R13) store both languages, as the API sends them, so a pack opens in either language offline.
 - Offline and freshness messages are paired local strings, because no server message exists offline.
 
-## 8. Current gaps (audit, 21 October 2026)
+## 8. Current gaps (audit, 21 October 2026; status updated 28 October 2026)
 
 Found by scanning every `.tsx` file for unpaired text and attributes, by reading the language and font code against the rules above, and by measuring computed styles in Edge (21 Oct 2026).
 
 | # | Gap | Where | Rule | Fix and task |
 |---|---|---|---|---|
-| U1 | English mode tightens every element by −0.06em, Bangla included, while English body text does not get Inter | `global.css` `[lang="en"]` on `<html>` | 4.2 | Scope font and tracking by text language (F03 follow-up) |
-| U2 | Fonts load twice from Google Fonts, twelve weights, no system fallback stacks; blocks the CSP | `index.html`, `global.css`, `tailwind.config.js` | 4.3 | System stacks and self-hosted subsets before the CSP (F03 follow-up) |
-| U3 | Published reviews and fallback content carry the page's `lang`, not their own | `ReviewFeedSection`, `pick()` callers | L5, L6 | Tag each review and each fallback. The feed (API 5.8) has no `language` field, so tag by detected script now and request `language` in 5.8 through the API change process (F03 follow-up) |
-| U4 | English-only `aria-label="Toggle Navigation"`; drawer icons not `aria-hidden` | `Navbar.tsx` | L4 | Pair it (F03 follow-up) |
-| U5 | English-only brand subtitle "Abhijatri Companion", uppercase with wide tracking | `Sidebar.tsx` | L4 | Pair or drop (F03 follow-up) |
-| U6 | System status page mostly English and `toLocaleTimeString()` with the browser locale | `HealthCheckPage.tsx` | L4, L7 | Pair labels; endpoint paths stay Latin (F03 follow-up) |
-| U7 | Prototype screens: English fragments ("Airplane Mode Ready", "Saved:", "/ person"), `toLocaleString()` and `toFixed()` without locale, "BDT" prefix only | `OfflinePacksPage`, `SavedTripsPage`, `PlannerPage` | L4, L7, L9 | Fix when each screen is rebuilt (R13, E09, E08) |
+| U1 | English mode tightens every element by −0.06em, Bangla included, while English body text does not get Inter | `global.css` `[lang="en"]` on `<html>` | 4.2 | Scope font and tracking by text language (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U2 | Fonts load twice from Google Fonts, twelve weights, no system fallback stacks; blocks the CSP | `index.html`, `global.css`, `tailwind.config.js` | 4.3 | System stacks and self-hosted subsets before the CSP (F03 follow-up) *Open; waits for decision Q2.* |
+| U3 | Published reviews and fallback content carry the page's `lang`, not their own | `ReviewFeedSection`, `pick()` callers | L5, L6 | Tag each review and each fallback. The feed (API 5.8) has no `language` field, so tag by detected script now and request `language` in 5.8 through the API change process (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U4 | English-only `aria-label="Toggle Navigation"`; drawer icons not `aria-hidden` | `Navbar.tsx` | L4 | Pair it (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U5 | English-only brand subtitle "Abhijatri Companion", uppercase with wide tracking | `Sidebar.tsx` | L4 | Pair or drop (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U6 | System status page mostly English and `toLocaleTimeString()` with the browser locale | `HealthCheckPage.tsx` | L4, L7 | Pair labels; endpoint paths stay Latin (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U7 | Prototype screens: English fragments ("Airplane Mode Ready", "Saved:", "/ person"), `toLocaleString()` and `toFixed()` without locale, "BDT" prefix only | `OfflinePacksPage`, `SavedTripsPage`, `PlannerPage` | L4, L7, L9 | Fix when each screen is rebuilt (R13, E09, E08) **Resolved 28 Oct 2026:** the three prototypes are replaced by an honest "not available yet" screen until E08, R13 and E09. |
 | U8 | Coordinates use `toFixed(4)` | `DestinationDetailPage` | L7 | Correct as is: coordinates are machine values |
-| U9 | API status pill reads "API Live", "API Offline", "Checking" in both languages | `Navbar.tsx` | L4 | Pair the three states (F03 follow-up) |
-| U10 | Search box is not wired, has no label, and its placeholders differ ("রুট বা এলাকা" against "trails, costs"); sidebar item reads "সিস্টেম স্ট্যাটাস" against "API Health" | `Navbar.tsx`, `Sidebar.tsx` | L4, 3.1, 6 | Hide search until it works; align both pairs (F03 follow-up) |
-| U11 | Language switch: `aria-label` "ইংরেজিতে দেখুন" overrides the visible word "English" and sits under `lang="en"`; button is 36 px high, theme button about 32 px | `PreferenceToggles.tsx` | L4, 5, 6 | Drop the `aria-label` so the name is the visible word, or put the label in the target language; 44 px targets (F03 follow-up) |
-| U12 | `localStorage` read and written without a guard; blocked storage throws on load and the app does not render | `LanguageContext.tsx`, `ThemeContext.tsx` | L2 | Wrap like `api/guests.ts` does (F03 follow-up) |
-| U13 | "({n} verified)" joined from a number and a fragment; English term "Editorial seeded selection" differs from "Seeded Destination Selection" | `RatingSummary.tsx` | L9, L10 | Whole sentences; fixed term (F03 follow-up) |
-| U14 | Star `aria-label` in Bangla uses a Latin digit and gives no scale ("4 তারকা") | `ReviewFeedSection.tsx` | L7 | `formatNumber` (F03 follow-up) |
-| U15 | Traveller types and comfort tiers read local maps although `GET /review-parameters` sends them | `GuestReviewForm.tsx` | 3.1 | Server labels first, local fallback (R09) |
-| U16 | `tracking-tight`, `tracking-wider` and `uppercase` applied to Bangla headings and taglines | Landing, Overview, Destinations, DestinationDetail, Reviews pages | 5 | Apply only under `:lang(en)` (F03 follow-up) |
-| U17 | First requests can send `Accept-Language: bn` for a stored English preference, because `<html lang>` is set in an effect that runs after child effects and `client.ts` reads it | `LanguageContext.tsx`, `api/client.ts` | L2 | Set `<html lang>` in the state initialiser, or have the client read the stored language (F03 follow-up) |
+| U9 | API status pill reads "API Live", "API Offline", "Checking" in both languages | `Navbar.tsx` | L4 | Pair the three states (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U10 | Search box is not wired, has no label, and its placeholders differ ("রুট বা এলাকা" against "trails, costs"); sidebar item reads "সিস্টেম স্ট্যাটাস" against "API Health" | `Navbar.tsx`, `Sidebar.tsx` | L4, 3.1, 6 | Hide search until it works; align both pairs (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U11 | Language switch: `aria-label` "ইংরেজিতে দেখুন" overrides the visible word "English" and sits under `lang="en"`; button is 36 px high, theme button about 32 px | `PreferenceToggles.tsx` | L4, 5, 6 | Drop the `aria-label` so the name is the visible word, or put the label in the target language; 44 px targets (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U12 | `localStorage` read and written without a guard; blocked storage throws on load and the app does not render | `LanguageContext.tsx`, `ThemeContext.tsx` | L2 | Wrap like `api/guests.ts` does (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U13 | "({n} verified)" joined from a number and a fragment; English term "Editorial seeded selection" differs from "Seeded Destination Selection" | `RatingSummary.tsx` | L9, L10 | Whole sentences; fixed term (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U14 | Star `aria-label` in Bangla uses a Latin digit and gives no scale ("4 তারকা") | `ReviewFeedSection.tsx` | L7 | `formatNumber` (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U15 | Traveller types and comfort tiers read local maps although `GET /review-parameters` sends them | `GuestReviewForm.tsx` | 3.1 | Server labels first, local fallback (R09) *Open.* |
+| U16 | `tracking-tight`, `tracking-wider` and `uppercase` applied to Bangla headings and taglines | Landing, Overview, Destinations, DestinationDetail, Reviews pages | 5 | Apply only under `:lang(en)` (F03 follow-up) **Fixed 28 Oct 2026.** |
+| U17 | First requests can send `Accept-Language: bn` for a stored English preference, because `<html lang>` is set in an effect that runs after child effects and `client.ts` reads it | `LanguageContext.tsx`, `api/client.ts` | L2 | Set `<html lang>` in the state initialiser, or have the client read the stored language (F03 follow-up) **Fixed 28 Oct 2026.** |
 
 ## 9. Decisions needed
 

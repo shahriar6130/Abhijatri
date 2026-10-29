@@ -32,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     navigate('/');
   };
 
-  const navItems = [
+  const navItems: { to: string; labelBn: string; labelEn: string; icon: typeof Compass; soon?: boolean }[] = [
     {
       to: '/overview',
       labelBn: 'সারসংক্ষেপ',
@@ -47,32 +47,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     },
     {
       to: '/planner',
-      labelBn: 'খরচ ক্যালকুলেটর',
-      labelEn: 'Cost Planner',
+      labelBn: 'খরচ পরিকল্পনা',
+      labelEn: 'Cost planner',
       icon: Calculator,
+      soon: true,
     },
     {
       to: '/offline-packs',
       labelBn: 'অফলাইন প্যাক',
-      labelEn: 'Offline Packs',
+      labelEn: 'Offline packs',
       icon: DownloadCloud,
+      soon: true,
     },
     {
       to: '/trips',
-      labelBn: 'সংরক্ষিত ট্রিপ',
-      labelEn: 'Saved Trips',
+      labelBn: 'সংরক্ষিত ভ্রমণ',
+      labelEn: 'Saved trips',
       icon: Bookmark,
+      soon: true,
     },
     {
       to: '/reviews',
-      labelBn: 'রিভিউ ও ফিডব্যাক',
+      labelBn: 'রিভিউ',
       labelEn: 'Reviews',
       icon: MessageSquareText,
     },
     {
       to: '/health',
       labelBn: 'সিস্টেম স্ট্যাটাস',
-      labelEn: 'API Health',
+      labelEn: 'System status',
       icon: HeartPulse,
     },
   ];
@@ -95,16 +98,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       >
         <div className="flex flex-col gap-6">
           {/* Logo Brand Header */}
-          <Link to="/" onClick={onClose} className="flex items-center gap-3 px-3 py-1 rounded-xl" aria-label="অভিযাত্রী / Abhijatri home">
+          <Link to="/" onClick={onClose} className="flex items-center gap-3 px-3 py-1 rounded-xl" aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')}>
             <div className="w-10 h-10 rounded-2xl bg-forest-primary dark:bg-neon-lime flex items-center justify-center text-white dark:text-dark-bg-base shadow-sm">
-              <Compass size={24} />
+              <Compass size={24} aria-hidden="true" />
             </div>
             <div className="flex flex-col">
               <span className="font-title font-bold text-xl text-forest-primary dark:text-neon-lime leading-tight">
                 অভিযাত্রী
               </span>
-              <span className="font-en text-[11px] font-semibold tracking-wider text-on-surface-variant dark:text-on-dark-muted uppercase">
-                Abhijatri Companion
+              <span className="text-[11px] font-semibold text-on-surface-variant dark:text-on-dark-muted">
+                {t('ভ্রমণ সঙ্গী', 'Travel companion')}
               </span>
             </div>
           </Link>
@@ -126,10 +129,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                     }`
                   }
                 >
-                  <Icon size={18} />
+                  <Icon size={18} aria-hidden="true" />
                   <span className="font-title text-[15px]">
                     {t(item.labelBn, item.labelEn)}
                   </span>
+                  {item.soon && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                      {t('শীঘ্রই', 'Soon')}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
