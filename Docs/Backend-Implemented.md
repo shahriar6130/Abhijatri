@@ -291,8 +291,6 @@ Findings for the backend owner, recorded in `Docs/Frontend-Implemented.md` secti
 | Area | Contract reference | Planned work |
 |---|---|---|
 | `Idempotency-Key` replay | section 3 | WP4 |
-| Edit pending review, appeals | 4.2, 5.5, 5.6 | WP6 (R07) |
-| Member reviews, `GET /reviews/{id}` | 4.5 | WP6 with authentication |
 | Reports and removal requests | 4.4, 5.7 | WP7 (R11) |
 | Paged staff moderation queue; `build` and `db_revision` in `/health/ready` | 5.9, 4.1 | WP8 |
 | Credentialed CORS, CSRF token endpoint | 1.2, `GET /auth/csrf` | WP9 |
@@ -828,4 +826,27 @@ Implements `Docs/Notification-Documentation.md` in full; its section 14 is ticke
 **Still open**
 - ~~Apply `0017` online~~ Applied 28 Oct 2026 (owner approved): old rows carried over, RLS on, no browser grants; live check on the online project created a member receipt (email off by preference) and a superadmin staff notice.
 - Configure `RESEND_WEBHOOK_SECRET` or `BREVO_WEBHOOK_TOKEN` and point the provider's webhook at `/api/v1/webhooks/notifications/{provider}` once a real email provider is live.
+
+### 5.18 R07: structured review CRUD, ownership and pagination (29 October 2026)
+
+Completes Gantt R07 against `Features/Review.md` 4.2, 5.1, 5.2, 9.2, 9.3 and `Docs/api/API.md` 5.4 to 5.6. Before this entry, create (guest and member), the public feed, guest withdraw and member appeals existed; the rows below were the gaps.
+
+**Built and tested**
+- **Edit while unpublished.** `PATCH /reviews/{id}/pending` (`app/services.py::edit_pending_review`, route in `app/api.py`). Allowed only in `PENDING` or `CHANGES_REQUESTED` (`INVALID_TRANSITION` otherwise, `REVIEW_VERSION_CONFLICT` on a stale version). Every content field is optional and omitted fields carry over; a sent `category_ratings` replaces the set and `{}` clears it; `null` and an empty body are refused (422). The edit is a new append-only revision (`sequence + 1`), the old one becomes `SUPERSEDED`, the review returns to `PENDING`, version rises, the moderation task is re-queued and `review.edited` is written to the outbox. Nothing is counted before publication, so no aggregate moves. A changed `visit_month` that collides with the member's one-review-per-destination-and-month index returns `MEMBER_REVIEW_EXISTS`. A guest proves ownership with the receipt (same receipt limits and progressive block as withdraw); a member uses session and CSRF, and another person's review answers `404`.
+- **Owner and staff read.** `GET /reviews/{id}` returns the current revision, state, rejection reason, appeal deadline and state, revision history and media states, `no-store`. Moderators also see the guest name, author id and conflict flag; authors see them as `null`. Strangers get `404`, anonymous `401`, and a moderator without TOTP gets `MFA_REQUIRED`, as on the staff routes.
+- **Member history.** `GET /reviews/mine` lists the member's own reviews newest first by `(created_at, id)`, with optional `status` and `destination_id` filters, default 20 and maximum 50 per page, and an opaque cursor that carries a listing prefix so a public-feed cursor is refused (`INVALID_CURSOR`). Migration `0018_review_crud` adds the partial index `ix_reviews_member_history`.
+- **Member withdraw.** `POST /reviews/{id}/withdraw` accepts a missing `receipt_secret` and then uses session, CSRF and ownership; the idempotent, version-checked `withdraw_review` is shared with the guest path.
+- **Guest appeal.** `POST /review-receipts/appeals` (`app/admin/cases.py::create_guest_appeal`): `REJECTED` review only, one appeal per decision (`DUPLICATE_APPEAL`), within the 30-day window (`APPEAL_WINDOW_CLOSED`, which is also the answer when there is nothing to appeal). The appeal joins the normal staff queue and needs an independent reviewer; an overturn returns the review to `PENDING`. `appeals.appellant_user_id` is now nullable (check `ck_appeals_guest_target`) and `appeals.reason` holds 2000 characters. The receipt status gains `appeal_state`.
+- **Request changes.** Moderators can decide `REQUEST_CHANGES` (`PENDING`/`UNDER_REVIEW` to `CHANGES_REQUESTED`), so the second editable state is reachable. It is audited (`review.request_changes`), emits `review.state_changed`, notifies the author (`content.changes_requested`, link `/account`) and shows the public-safe reason on the receipt status.
+- **Consistency fix.** `rejection_details` used `created_at + 30 days` while appeals used the end of the 30th day in Asia/Dhaka. Both now call `services.appeal_deadline`, so the receipt shows the real deadline.
+- Media upload intents are also allowed in `CHANGES_REQUESTED`.
+- Migration `0018_review_crud`: enum values `moderation_decision.REQUEST_CHANGES` and `revision_status.SUPERSEDED` (committed outside the transaction), the history index, the nullable appellant, the longer reason. The downgrade removes the guest appeals and restores the old column limits; PostgreSQL cannot drop the two enum values, so they remain defined but unused.
+- Tests: `tests/test_review_crud.py` (16 PostgreSQL tests: member and guest edit, validation and credentials, the five refused states, month collision, request-changes round trip, owner/staff/stranger reads, history paging with a timestamp tie, member and guest withdraw, guest appeal through to an overturn, late appeal). Existing `tests/test_receipts.py` now expects `appeal_state`. OpenAPI snapshot regenerated.
+
+**Still open**
+- The public and staff screens are not wired (guide: `Docs/Review-Edit-Appeal-UIUX.md`): the account "My reviews" list, the edit form for a pending review, the guest appeal form on the receipt page, and a moderator "Request changes" button in the staff queue. The API for all of them is ready.
+- Published reviews are still not editable (Review.md 5.2: withdraw and submit again until v1.1).
+- `Idempotency-Key` replay on the new writes is part of WP4.
+- ~~Apply `0018` online~~ Applied 29 Oct 2026 (owner approved) to the Supabase project `Abhijatri`: `alembic_version` is `0018_review_crud`, both enum values, the history index, the nullable appellant, the 2000-character reason and `ck_appeals_guest_target` verified by query; RLS on `appeals` unchanged; no new security advisor finding. The Railway API still has to be redeployed to serve the new routes.
+- Frontend build brief, automated tests, manual cases and sign-off checklist: `Docs/Review-Edit-Appeal-UIUX.md`.
 

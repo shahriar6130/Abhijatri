@@ -7,7 +7,7 @@ event, and is committed once by the route. Times are server UTC; appeal deadline
 """
 
 import uuid
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from app.admin import audit, tasks
 from app.auth.sessions import Principal
-from app.config import get_settings
 from app.errors import ApiError
 from app.models import (
     Appeal,
@@ -34,10 +33,9 @@ from app.models import (
     VerificationEvidence,
 )
 from app.notify import events
-from app.services import ReviewError, moderate_review
+from app.services import ReviewError, appeal_deadline, moderate_review
 from app.storage import ALLOWED_TYPES, MAX_BYTES, StorageClient
 
-APPEAL_DAYS = 30
 APPROVED_EVIDENCE_HOURS = 24  # Security 3.7: evidence is erased within 24 hours of a decision
 REJECTED_CASE_DAYS = 30  # spec 10: rejected verification cases are kept 30 days
 EMERGENCY_FOLLOW_UP_HOURS = 24
@@ -472,13 +470,6 @@ def enforcement_action(
 # =========================================================================================
 
 
-def appeal_deadline(decided_at: datetime) -> datetime:
-    """End of the 30th day after the decision, in the policy time zone (Asia/Dhaka)."""
-    zone = get_settings().display_tz
-    last_day = decided_at.astimezone(zone).date() + timedelta(days=APPEAL_DAYS)
-    return datetime.combine(last_day, time(23, 59, 59), tzinfo=zone).astimezone(UTC)
-
-
 def appealable_decisions(session: Session, user_id: uuid.UUID) -> list[dict[str, Any]]:
     """Decisions this member may appeal now, with their deadlines (the member's own content and cases)."""
     now = _now()
@@ -562,6 +553,65 @@ def create_appeal(session: Session, appellant: Principal, *, target_type: str, t
     return appeal
 
 
+def create_guest_appeal(session: Session, review_id: uuid.UUID, *, statement: str) -> Appeal:
+    """A Guest's appeal against the rejection of their review (Review.md 4.2, API.md 5.6).
+
+    The caller has already proved ownership with the receipt. The appeal targets the rejection
+    decision itself, so it follows the same rules as a member's: one per decision, 30-day window,
+    independent reviewer. ``appellant_user_id`` stays empty because a Guest has no account.
+    """
+    review = session.scalar(select(Review).where(Review.id == review_id).with_for_update())
+    if review is None:
+        raise ApiError("NOT_FOUND")
+    action = session.scalar(
+        select(ModerationActionRecord)
+        .where(ModerationActionRecord.review_id == review.id, ModerationActionRecord.decision == ModerationDecision.REJECT)
+        .order_by(ModerationActionRecord.created_at.desc())
+        .limit(1)
+    )
+    if review.status != ReviewStatus.REJECTED or action is None:
+        raise ApiError("APPEAL_WINDOW_CLOSED")  # nothing to appeal (API.md 5.6)
+    if session.scalar(select(Appeal.id).where(Appeal.moderation_action_id == action.id, Appeal.state != "withdrawn")) is not None:
+        raise ApiError("DUPLICATE_APPEAL")
+    deadline = appeal_deadline(action.created_at)
+    if _now() > deadline:
+        raise ApiError("APPEAL_WINDOW_CLOSED")
+    appeal = Appeal(
+        appellant_user_id=None,
+        moderation_action_id=action.id,
+        reason=statement,
+        original_decider_id=action.actor_user_id,
+        deadline_at=deadline,
+    )
+    try:
+        with session.begin_nested():
+            session.add(appeal)
+            session.flush()
+    except IntegrityError as error:
+        raise ApiError("DUPLICATE_APPEAL") from error
+    tasks.ensure_task(session, "appeal", appeal.id, priority=1)
+    audit.record(
+        session,
+        actor=None,
+        action="appeal.received",
+        target_type="appeal",
+        target_id=appeal.id,
+        metadata={"target_type": "moderation_action", "target_id": str(action.id), "deadline_at": deadline.isoformat(), "by": "guest_receipt"},
+    )
+    emit(
+        session,
+        "appeal.received",
+        appeal.id,
+        {
+            "appeal_id": str(appeal.id),
+            "appellant_id": None,  # a Guest has no inbox; the receipt status shows the outcome
+            "deadline_at": deadline.isoformat(),
+            "staff_recipients": active_staff_ids(session, exclude=action.actor_user_id),
+        },
+    )
+    return appeal
+
+
 def withdraw_appeal(session: Session, appellant: Principal, appeal_id: uuid.UUID) -> Appeal:
     appeal = session.scalar(select(Appeal).where(Appeal.id == appeal_id).with_for_update())
     if appeal is None or appeal.appellant_user_id != appellant.user.id:
@@ -616,7 +666,7 @@ def decide_appeal(
     task = tasks.require_lease(session, principal, task_id, lease_token, appeal_id)
     if appeal.original_decider_id == principal.user.id:
         raise ApiError("APPEAL_REVIEWER_NOT_INDEPENDENT")
-    if appeal.appellant_user_id == principal.user.id:
+    if appeal.appellant_user_id is not None and appeal.appellant_user_id == principal.user.id:
         raise ApiError("FORBIDDEN")
     if appeal.version != expected_version:
         raise ApiError("REVIEW_VERSION_CONFLICT")
@@ -628,5 +678,10 @@ def decide_appeal(
     appeal.decided_by, appeal.decided_at, appeal.decision_note = principal.user.id, _now(), note
     tasks.complete(task)
     audit.record(session, actor=principal, action=f"appeal.{outcome}", target_type="appeal", target_id=appeal.id, reason=note, metadata={"version": appeal.version}, request_id=request_id)
-    emit(session, "appeal.decided", appeal.id, {"appeal_id": str(appeal.id), "appellant_id": str(appeal.appellant_user_id), "outcome": outcome})
+    emit(
+        session,
+        "appeal.decided",
+        appeal.id,
+        {"appeal_id": str(appeal.id), "appellant_id": str(appeal.appellant_user_id) if appeal.appellant_user_id else None, "outcome": outcome},
+    )
     return {"appeal_id": str(appeal.id), "state": appeal.state, "version": appeal.version}

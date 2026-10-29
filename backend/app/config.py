@@ -21,7 +21,8 @@ def normalize_database_url(value: str) -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Values pasted into a dashboard often carry a stray space; trim them so a setting never fails on it.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", str_strip_whitespace=True)
 
     app_env: str = "production"  # fail closed: dev/test must be requested explicitly
     database_url: str = DEFAULT_DATABASE_URL

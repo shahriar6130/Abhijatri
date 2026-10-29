@@ -72,6 +72,8 @@ class RevisionStatus(str, enum.Enum):
     PUBLISHED = "PUBLISHED"
     REJECTED = "REJECTED"
     TOMBSTONED = "TOMBSTONED"
+    # Replaced by a newer revision while the review was still unpublished (Review.md 5.2).
+    SUPERSEDED = "SUPERSEDED"
 
 
 class ReviewLanguage(str, enum.Enum):
@@ -118,6 +120,7 @@ class ModerationDecision(str, enum.Enum):
     REJECT = "REJECT"
     HIDE = "HIDE"
     RESTORE = "RESTORE"
+    REQUEST_CHANGES = "REQUEST_CHANGES"
     SET_CONFLICT = "SET_CONFLICT"
     CLEAR_CONFLICT = "CLEAR_CONFLICT"
 
@@ -422,6 +425,13 @@ class Review(Base):
                 "author_user_id IS NOT NULL AND duplicate_override = false AND "
                 "status IN ('PENDING', 'UNDER_REVIEW', 'CHANGES_REQUESTED', 'PUBLISHED', 'HIDDEN')"
             ),
+        ),
+        Index(
+            "ix_reviews_member_history",
+            "author_user_id",
+            text("created_at DESC"),
+            text("id DESC"),
+            postgresql_where=text("author_user_id IS NOT NULL"),
         ),
         Index(
             "ix_reviews_published_feed",
@@ -884,6 +894,8 @@ class Appeal(Base):
         CheckConstraint(
             "num_nonnulls(moderation_action_id, enforcement_case_id, verification_case_id) = 1", name="ck_appeals_one_target"
         ),
+        # a guest appeal (no account) is always against a moderation action, reached through the receipt
+        CheckConstraint("appellant_user_id IS NOT NULL OR moderation_action_id IS NOT NULL", name="ck_appeals_guest_target"),
         # one appeal per decision: a decided appeal cannot be filed again; a withdrawn one can
         Index("uq_appeals_moderation", "moderation_action_id", unique=True, postgresql_where=text("moderation_action_id IS NOT NULL AND state <> 'withdrawn'")),
         Index("uq_appeals_enforcement", "enforcement_case_id", unique=True, postgresql_where=text("enforcement_case_id IS NOT NULL AND state <> 'withdrawn'")),
@@ -891,12 +903,13 @@ class Appeal(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    appellant_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Null for a guest appeal filed with a receipt (Review.md 4.2); the review's receipt proves standing.
+    appellant_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     moderation_action_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("moderation_actions.id", ondelete="CASCADE"))
     enforcement_case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("enforcement_cases.id", ondelete="CASCADE"))
     verification_case_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("verification_cases.id", ondelete="CASCADE"))
     state: Mapped[str] = mapped_column(String(12), nullable=False, default="received", server_default="received")
-    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    reason: Mapped[str] = mapped_column(String(2000), nullable=False)
     original_decider_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
