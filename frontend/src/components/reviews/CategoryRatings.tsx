@@ -63,7 +63,7 @@ export const CategoryRatings: React.FC<{
                 </span>
                 <span className="text-xs text-on-surface-variant dark:text-on-dark-muted">{prompt}</span>
               </div>
-              <div role="radiogroup" aria-labelledby={`cat-${category}`} className="flex items-center gap-0.5 shrink-0">
+              <div role="radiogroup" aria-labelledby={`cat-${category}`} className="flex flex-wrap items-center gap-0.5 sm:shrink-0">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     key={star}

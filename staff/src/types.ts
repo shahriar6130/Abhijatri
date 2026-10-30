@@ -157,7 +157,7 @@ export interface DecisionInput {
   taskId: string;
   leaseToken: string;
   expectedVersion: number;
-  decision: 'PUBLISH' | 'REJECT' | 'HIDE' | 'RESTORE';
+  decision: 'PUBLISH' | 'REJECT' | 'HIDE' | 'RESTORE' | 'REQUEST_CHANGES';
   reasonCode: string;
   note?: string;
   /** PUBLISH only: photos or videos to reject; the others are approved with the review. */

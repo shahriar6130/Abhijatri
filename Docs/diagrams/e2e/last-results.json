@@ -1,0 +1,356 @@
+[
+  {
+    "id": "S1",
+    "name": "member signs in through the sign-in page",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "C1",
+    "name": "member review is created and a receipt page is shown",
+    "pass": true,
+    "detail": "27498f3a-6503-4ab5-b766-34b7c5b0b3e0"
+  },
+  {
+    "id": "L1",
+    "name": "My reviews lists the new review with a \"Waiting for moderation\" chip",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L2",
+    "name": "a pending review offers Edit and Withdraw (and no Appeal)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L3",
+    "name": "the status chip has text, not only colour",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E1",
+    "name": "edit form opens prefilled with the review",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E2",
+    "name": "Save is disabled until something changes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E3",
+    "name": "a too-short note is refused on the page with an inline error",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E4",
+    "name": "Save turns on after a change",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E5",
+    "name": "the PATCH sent only the version and the changed title",
+    "pass": true,
+    "detail": "{\"expected_version\":1,\"title\":\"UI test A mvv6telr edited\"}"
+  },
+  {
+    "id": "E6",
+    "name": "after saving, the detail page shows \"Saved as version 2\" and two versions in the history",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E7a",
+    "name": "a second writer can save first (version 2 to 3)",
+    "pass": true,
+    "detail": "200"
+  },
+  {
+    "id": "E7",
+    "name": "a stale save shows the conflict message, keeps the typed text and offers Reload",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "E8",
+    "name": "Reload brings in the latest version (tab B title)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M1",
+    "name": "moderator signs in to the staff app with password and TOTP",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M2",
+    "name": "the decision list offers \"Ask for changes\" next to Publish and Reject",
+    "pass": true,
+    "detail": "Publish | Reject | Ask for changes"
+  },
+  {
+    "id": "R1",
+    "name": "the author now sees \"Changes requested\" on the list",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "R2",
+    "name": "the detail page shows the moderator's reason",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "R3",
+    "name": "the edit form is still available and repeats the reason",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "R4",
+    "name": "after editing, the review is waiting for moderation again",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P1",
+    "name": "a published review has no Edit button but can be withdrawn",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P2",
+    "name": "opening the edit URL of a published review shows \"can no longer be edited\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P3",
+    "name": "the published review appears on the public destination page",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "F1",
+    "name": "the public review list shows a filter bar",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "F2",
+    "name": "filtering to 1 star hides a 4-star review and explains why",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "F3",
+    "name": "clearing the rating filter brings it back",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "F4",
+    "name": "the \"Guests\" author filter hides a member review",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G1",
+    "name": "the first page shows 20 reviews and a \"Show more\" button (23 bulk reviews added)",
+    "pass": true,
+    "detail": "20"
+  },
+  {
+    "id": "G2",
+    "name": "loading more appends the rest with no duplicates",
+    "pass": true,
+    "detail": "40"
+  },
+  {
+    "id": "G3",
+    "name": "at the end the list says \"That is all your reviews.\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G4",
+    "name": "the status filter resets to page 1 and shows only that status",
+    "pass": true,
+    "detail": "20 http://localhost:5173/account/reviews?status=PENDING"
+  },
+  {
+    "id": "G5",
+    "name": "a filter with no match shows the empty message",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G6",
+    "name": "the destination filter narrows the list to that destination only",
+    "pass": true,
+    "detail": "14 E2E Bay 67bc349d · 1 Sept 1991"
+  },
+  {
+    "id": "W1",
+    "name": "Withdraw asks for confirmation first",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "W2",
+    "name": "Cancel leaves the review untouched",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "W3",
+    "name": "confirming withdraws it, shows the notice and the card turns \"Withdrawn\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "W4",
+    "name": "withdrawing again is accepted (idempotent retry)",
+    "pass": true,
+    "detail": "200"
+  },
+  {
+    "id": "O1",
+    "name": "signed out, My reviews shows a sign-in prompt, not a blank page",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "O2",
+    "name": "the review detail API refuses a signed-out caller (401)",
+    "pass": true,
+    "detail": "401"
+  },
+  {
+    "id": "O3",
+    "name": "an unknown review id answers 404",
+    "pass": true,
+    "detail": "404"
+  },
+  {
+    "id": "O4",
+    "name": "the page for an unknown review says \"not found\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "N1",
+    "name": "offline, a filter change shows an error with Retry (and no stale list)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "N2",
+    "name": "back online, Retry reloads the list",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "X1",
+    "name": "at 360 px wide there is no horizontal scroll",
+    "pass": true,
+    "detail": "{\"sw\":360,\"wide\":[]}"
+  },
+  {
+    "id": "X2",
+    "name": "every card control is at least 40 px tall (tap targets)",
+    "pass": true,
+    "detail": "0"
+  },
+  {
+    "id": "X3",
+    "name": "in Bangla the page heading is in Bangla",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "X4",
+    "name": "every form control on My reviews has a label",
+    "pass": true,
+    "detail": "0"
+  },
+  {
+    "id": "GU1",
+    "name": "a guest review is created and shows the receipt once",
+    "pass": true,
+    "detail": "abr1_06F"
+  },
+  {
+    "id": "GU2",
+    "name": "the receipt is not kept in browser storage or the URL",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU3",
+    "name": "the receipt status panel shows \"Waiting for moderation\" with Edit and Withdraw",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU4",
+    "name": "the guest edit form starts empty and says to fill in only what changes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU5",
+    "name": "Save is off until the guest changes something",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU6",
+    "name": "the guest PATCH carries the receipt in the body, only the title as content, and no cookie",
+    "pass": true,
+    "detail": "[\"expected_version\",\"receipt_secret\",\"title\"]"
+  },
+  {
+    "id": "GU7",
+    "name": "after a rejection the receipt shows the reason and the appeal deadline",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU8",
+    "name": "a rejected review no longer offers Edit",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU9",
+    "name": "Send appeal stays off below 20 characters and the counter says so",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU10",
+    "name": "the appeal is sent with the receipt in the body only, and the page says \"Appeal sent\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "GU11",
+    "name": "the status now shows \"Appeal received\" and no second appeal is offered",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M4",
+    "name": "the owner API view lists the version history and hides moderator-only fields",
+    "pass": true,
+    "detail": "200"
+  }
+]

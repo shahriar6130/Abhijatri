@@ -5,6 +5,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { detectReviewLanguage, getReviewFeed } from '../../api/reviews';
 import type { CategoryAverage, PublicReview } from '../../types';
 import { formatNumber, formatTimestamp } from '../../utils/format';
+import { DEFAULT_FILTERS, applyReviewFilters, filtersActive, type ReviewFilters } from '../../utils/reviewAuthor';
 import { describeError, EmptyState, ErrorState, LoadingState } from '../common/StatusViews';
 import { CategoryAverages, CategoryChips } from '../destination/CategoryAverages';
 import { ReportReview } from './ReportReview';
@@ -33,6 +34,7 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
   const [error, setError] = useState<unknown>(null);
   const [moreError, setMoreError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
+  const [filters, setFilters] = useState<ReviewFilters>(DEFAULT_FILTERS);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,6 +71,9 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
     }
   };
 
+  const shown = applyReviewFilters(items, filters);
+  const active = filtersActive(filters);
+
   return (
     <section aria-labelledby="reviews-heading" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -103,6 +108,47 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
         />
       )}
 
+      {!loading && !error && items.length > 0 && (
+        <form role="search" aria-label={t('রিভিউ ফিল্টার', 'Review filters')} className="flex flex-col gap-3 p-3 rounded-xl bg-surface-sage/40 dark:bg-dark-surface-2" onSubmit={(e) => e.preventDefault()}>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="feed-rating" className="text-xs font-bold text-on-surface-variant dark:text-on-dark-muted">{t('রেটিং', 'Rating')}</label>
+              <select id="feed-rating" value={filters.rating} onChange={(e) => setFilters({ ...filters, rating: Number(e.target.value) as ReviewFilters['rating'] })} className="min-h-[44px] px-3 rounded-xl bg-white dark:bg-dark-surface-1 text-sm">
+                <option value={0}>{t('সব রেটিং', 'All ratings')}</option>
+                {[5, 4, 3, 2, 1].map((n) => (<option key={n} value={n}>{t(`${n} তারকা`, `${n} star${n === 1 ? '' : 's'}`)}</option>))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="feed-author" className="text-xs font-bold text-on-surface-variant dark:text-on-dark-muted">{t('লেখক', 'Author')}</label>
+              <select id="feed-author" value={filters.author} onChange={(e) => setFilters({ ...filters, author: e.target.value as ReviewFilters['author'] })} className="min-h-[44px] px-3 rounded-xl bg-white dark:bg-dark-surface-1 text-sm">
+                <option value="all">{t('সবাই', 'Everyone')}</option>
+                <option value="member">{t('সদস্য', 'Members')}</option>
+                <option value="guest">{t('অতিথি', 'Guests')}</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="feed-sort" className="text-xs font-bold text-on-surface-variant dark:text-on-dark-muted">{t('সাজান', 'Sort by')}</label>
+              <select id="feed-sort" value={filters.sort} onChange={(e) => setFilters({ ...filters, sort: e.target.value as ReviewFilters['sort'] })} className="min-h-[44px] px-3 rounded-xl bg-white dark:bg-dark-surface-1 text-sm">
+                <option value="newest">{t('সবচেয়ে নতুন', 'Newest')}</option>
+                <option value="highest">{t('সর্বোচ্চ রেটিং', 'Highest rating')}</option>
+                <option value="lowest">{t('সর্বনিম্ন রেটিং', 'Lowest rating')}</option>
+              </select>
+            </div>
+            <label className="inline-flex items-center gap-2 min-h-[44px] text-sm cursor-pointer">
+              <input type="checkbox" checked={filters.withMedia} onChange={(e) => setFilters({ ...filters, withMedia: e.target.checked })} className="h-5 w-5 accent-forest-primary dark:accent-neon-lime" />
+              {t('ছবি বা ভিডিওসহ', 'With photos or video')}
+            </label>
+            {active && (
+              <button type="button" onClick={() => setFilters(DEFAULT_FILTERS)} className="min-h-[44px] px-3 text-xs font-bold underline">{t('ফিল্টার মুছুন', 'Clear filters')}</button>
+            )}
+          </div>
+          <p className="text-[11px] text-on-surface-variant dark:text-on-dark-muted" role="status" aria-live="polite">
+            {t(`লোড হওয়া ${formatNumber(items.length, language)}টির মধ্যে ${formatNumber(shown.length, language)}টি দেখাচ্ছে।`, `Showing ${shown.length} of the ${items.length} loaded reviews.`)}
+            {cursor && ' ' + t('ফিল্টার শুধু লোড হওয়া রিভিউতে কাজ করে; আরও দেখতে "আরও রিভিউ" চাপুন।', 'Filters apply to loaded reviews; use "Show more reviews" to load more.')}
+          </p>
+        </form>
+      )}
+
       {loading && <LoadingState label={t('রিভিউ লোড হচ্ছে…', 'Loading reviews…')} />}
       {!loading && error !== null && <ErrorState error={error} onRetry={() => setAttempt((n) => n + 1)} />}
       {!loading && !error && items.length === 0 && (
@@ -112,9 +158,12 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
         />
       )}
 
-      {!loading && !error && items.length > 0 && (
+      {!loading && !error && items.length > 0 && shown.length === 0 && (
+        <EmptyState title={t('এই ফিল্টারে কোনো রিভিউ মেলেনি', 'No loaded review matches these filters')} hint={cursor ? t('আরও রিভিউ লোড করুন বা ফিল্টার মুছুন।', 'Load more reviews or clear the filters.') : t('ফিল্টার মুছুন।', 'Clear the filters.')} />
+      )}
+      {!loading && !error && shown.length > 0 && (
         <ul className="flex flex-col gap-3">
-          {items.map((review) => (
+          {shown.map((review) => (
             <li key={review.id} className="tonal-card p-5 flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-on-surface-variant dark:text-on-dark-muted">
                 <span className="inline-flex items-center gap-0.5" aria-label={t(

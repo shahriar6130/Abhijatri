@@ -44,7 +44,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
 
           <div className="flex items-center gap-2 lg:hidden">
             <Compass className="text-forest-primary dark:text-neon-lime" size={24} aria-hidden="true" />
-            <span className="font-title font-bold text-lg text-forest-primary dark:text-neon-lime">
+            {/* Below 420 px the three action buttons need the room; the logo icon stays and the sidebar names the app. */}
+            <span className="hidden min-[420px]:inline font-title font-bold text-lg text-forest-primary dark:text-neon-lime">
               অভিযাত্রী
             </span>
           </div>
@@ -53,7 +54,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
           {/* Backend API Health Pill */}
           <Link
             to="/health"

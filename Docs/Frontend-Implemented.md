@@ -241,3 +241,25 @@ All runs were local against an embedded PostgreSQL 16 server (the project target
 | Sending `category_ratings`; uploading photos through media intents | R07 and the media pipeline (Review.md A1, A2) |
 | Planner, offline packs and saved trips (placeholders since 28 Oct 2026) | E06–E08, R12–R13, E09 |
 | Public deployment. `frontend/vercel.json` is ready; deploying and adding the Vercel origin to the API's `CORS_ALLOWED_ORIGINS` is with Shahriar Islam (`Architecture.md` section 5). | Interim Vercel deploy |
+
+## R07/R09 review author controls, list and filters (30 October 2026)
+
+Guide: `Docs/Review-Edit-Appeal-UIUX.md`. Test cases: `Docs/Review-Frontend-Manual-Test-Cases.docx`. API: `Docs/api/API.md` 5.3 to 5.6, 5.5a.
+
+**Built and tested**
+- **My reviews** (`/account/reviews`): the member's own reviews, newest first, status and destination filters kept in the URL, "Show more reviews" with an announcement, loading, empty, error-with-Retry and offline states. A new filter restarts from page 1; an `INVALID_CURSOR` restarts the list.
+- **Review detail** (`/account/reviews/:id`): content, version history, media states, the moderator's reason, appeal state, Edit and Withdraw with confirmation. An unknown or foreign id shows "not found".
+- **Edit** (`/account/reviews/:id/edit` and the receipt panel): one form, two modes. Members edit the loaded review and only changed fields are sent; guests start with an empty form and only touched fields are sent, with the receipt in the body and no cookie. Handles version conflict (keeps the typed text, Reload), locked state, visit-month collision and field errors. Edit is offered only while PENDING or CHANGES_REQUESTED.
+- **Guest appeal**: in the receipt status panel for a rejection before its deadline, 20 to 2000 characters with a live counter, the appeal state shown afterwards.
+- **Public list filters** on the destination page: rating, author type, photos or video, sort. They apply to the reviews already loaded and the page says so.
+- **Staff**: "Ask for changes" decision with four reasons and a note that the author can read the reason. The queue now refreshes every 5 s and the inbox every 10 s while visible, and on focus (it was 30 s), so a moderator sees a new review within seconds.
+- Fixes found by testing: the top bar overflowed at 360 px; the create form said category ratings were unsupported (now sent by default); the CI secret check lists the new Word documents.
+
+**Evidence (30 October 2026)**: 95 public-app, 28 staff-app and 19 ops-app unit tests pass; all three apps build; `tsc` clean; the public build has no staff or ops code. A real-Chrome run on the local stack passed 59 of 59 checks (`Docs/diagrams/e2e/review-author.e2e.mjs`, results in `last-results.json`).
+
+**Still open**
+- A person has not yet run the 92 manual cases on real devices, with a screen reader, or on Safari and Firefox.
+- The online run was done as the signed-in superadmin (14 checks pass); the supplied member password was refused, and publishing, the guest appeal and a member request-changes round trip were not run online (they pass locally).
+- Photo and video upload from the edit screen is not built (upload remains on the create form).
+- Public list filters are client-side; a server-side filter needs an API change.
+- In development over HTTP/1.1, six open tabs can stall requests because each holds a notification stream (not an issue behind the HTTP/2 production proxy).

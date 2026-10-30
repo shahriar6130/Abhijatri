@@ -13,6 +13,9 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { VerificationPage } from './pages/VerificationPage';
 import { AppealsPage } from './pages/AppealsPage';
+import { MyReviewsPage } from './pages/MyReviewsPage';
+import { ReviewDetailPage } from './pages/ReviewDetailPage';
+import { ReviewEditPage } from './pages/ReviewEditPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { GuestEntryPage } from './pages/GuestEntryPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -53,6 +56,10 @@ export const App: React.FC = () => {
                 <Route path="reviews" element={<ReviewsPage />} />
                 <Route path="health" element={<HealthCheckPage />} />
                 <Route path="account/verification" element={<VerificationPage />} />
+                <Route path="account" element={<Navigate to="/account/reviews" replace />} />
+                <Route path="account/reviews" element={<MyReviewsPage />} />
+                <Route path="account/reviews/:id" element={<ReviewDetailPage />} />
+                <Route path="account/reviews/:id/edit" element={<ReviewEditPage />} />
                 <Route path="account/appeals" element={<AppealsPage />} />
                 <Route path="account/notifications" element={<NotificationsPage />} />
               </Route>

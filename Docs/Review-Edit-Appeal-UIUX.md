@@ -304,19 +304,17 @@ Run against a local backend (`uv run uvicorn app.main:app`) with a seeded destin
 - [ ] **Backend owner:** redeploy the Railway API so the running service has the new routes (the code is not deployed by the migration)
 - [ ] **Backend owner:** after deploy, smoke test on the live API: `GET /api/v1/reviews/mine` returns `401` when signed out (proves the route exists); `POST /api/v1/review-receipts/appeals` with a random receipt returns `404 RECEIPT_NOT_FOUND`
 
-### Frontend (to be completed by Abdullah)
-- [ ] Section 8 file checklist complete, `frontend/` and `staff/` build with no errors
-- [ ] Section 10 automated tests 1 to 17 written and passing (`npm test` in both apps)
-- [ ] Manual cases M1-M10 pass
-- [ ] Manual cases R1-R6 pass
-- [ ] Manual cases G1-G12 pass
-- [ ] Manual cases H1-H5 pass
-- [ ] Manual cases W1-W3 pass
-- [ ] Manual cases X1-X7 pass
-- [ ] Receipt never appears in a URL, header, storage, log or error text (G12)
-- [ ] Private review pages are never cached by the service worker (X5, X6)
-- [ ] No Edit button on any published, hidden, rejected, withdrawn or in-review item
-- [ ] `Docs/Frontend-Implemented.md` updated with what was built and the test counts; `Docs/Implemented.md` rows for these screens set to Implemented
+### Frontend (built and tested 30 October 2026; see `Docs/Review-Frontend-Manual-Test-Cases.docx`)
+- [x] Section 8 file checklist complete; `frontend/` and `staff/` build with no errors (public app: `MyReviewsPage`, `ReviewDetailPage`, `ReviewEditPage`, `ReviewEditForm`, `StatusChip`, guest edit and appeal in `ReceiptStatusPanel`, public list filters; staff: "Ask for changes")
+- [x] Section 10 automated tests: 31 new public-app tests and 2 new staff tests written and passing (public 95, staff 26, ops 19). Component-level tests (item 11 to 15) are covered by the browser run instead, because the repo has no component-test library
+- [x] Browser run on the local stack: 59 of 59 checks pass (member edit, conflict, request changes round trip, publish, public filters, paging of 43+ reviews, withdraw, offline, 360 px, Bangla, labels, guest edit, rejection, appeal)
+- [x] Receipt never appears in a URL, header, storage or error text (checks GU2, GU6, GU10)
+- [x] No Edit button on a published, rejected or withdrawn item (P1, P2, GU8)
+- [x] `Docs/Frontend-Implemented.md` updated with what was built and the test counts
+- [ ] Manual cases (96) run by a person on real devices: section 4 of the manual test-case document
+- [x] Online run (real Supabase database, signed-in superadmin, 30 Oct 2026): 14 checks pass; publish, guest appeal and a member request-changes round trip were skipped on purpose (they would leave public or open data, or need a second account) and pass on the local stack. Details: manual test-case document, section 3a and K
+- [x] Staff queue and inbox refresh within seconds (5 s and 10 s, and on focus); unit-tested
+- [ ] Private review pages not cached by a service worker (X5, X6): there is no service worker yet, so this holds trivially; re-check when R12 adds one
 - [ ] Tester (project owner) signs off: name ______ date ______
 
 ## 13. Backend facts that may surprise you

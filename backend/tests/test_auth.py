@@ -660,6 +660,11 @@ def test_validators() -> None:
     assert validation.password_problem("alllettersnodigit") == "WEAK"
     assert validation.is_reserved("Admin") and validation.is_reserved("m0derator") and validation.is_reserved("Abhijatri Team")
     assert not validation.is_reserved("Nila Rahman")
+    assert validation.public_author_name("Nila Rahman") == "Nila Rahman"
+    assert validation.public_author_name("nila@example.com") is None and validation.public_author_name(None) is None
+    with pytest.raises(ApiError) as refused:
+        validation.validate_registration("a@example.com", "Passw0rdTest99", "nila@example.com")
+    assert refused.value.field_errors == [{"field": "display_name", "code": "INVALID_VALUE"}]
     assert re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", validation.normalize_email("  A@B.Co "))
 
 

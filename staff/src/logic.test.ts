@@ -1,21 +1,68 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { StaffError } from './api';
-import { RELOAD_CODES, REASONS, decisionsFor, errorText, formatCountdown, newIdempotencyKey, qrImageSource, reportMoves, secondsLeft } from './logic';
+import { INBOX_POLL_MS, QUEUE_POLL_MS, RELOAD_CODES, REASONS, decisionsFor, keepFresh, errorText, formatCountdown, newIdempotencyKey, qrImageSource, reportMoves, secondsLeft } from './logic';
 
 describe('decisionsFor (mirrors the server state machine)', () => {
-  it('offers publish or reject for a waiting review', () => {
-    expect(decisionsFor('PENDING')).toEqual(['PUBLISH', 'REJECT']);
-    expect(decisionsFor('UNDER_REVIEW')).toEqual(['PUBLISH', 'REJECT']);
+  it('offers publish, reject or ask for changes for a waiting review', () => {
+    expect(decisionsFor('PENDING')).toEqual(['PUBLISH', 'REJECT', 'REQUEST_CHANGES']);
+    expect(decisionsFor('UNDER_REVIEW')).toEqual(['PUBLISH', 'REJECT', 'REQUEST_CHANGES']);
   });
   it('offers hide for a published review and restore for a hidden one', () => {
     expect(decisionsFor('PUBLISHED')).toEqual(['HIDE']);
     expect(decisionsFor('HIDDEN')).toEqual(['RESTORE']);
   });
   it('offers nothing for final states', () => {
+    // CHANGES_REQUESTED is the author's turn: staff cannot decide again until the author edits.
     for (const state of ['REJECTED', 'WITHDRAWN', 'DELETED', 'CHANGES_REQUESTED', 'nonsense']) expect(decisionsFor(state)).toEqual([]);
   });
   it('has at least one reason for every decision', () => {
-    for (const decision of ['PUBLISH', 'REJECT', 'HIDE', 'RESTORE'] as const) expect(REASONS[decision].length).toBeGreaterThan(0);
+    for (const decision of ['PUBLISH', 'REJECT', 'HIDE', 'RESTORE', 'REQUEST_CHANGES'] as const) expect(REASONS[decision].length).toBeGreaterThan(0);
+  });
+  it('never offers ask-for-changes on a published, hidden or finished review', () => {
+    for (const state of ['PUBLISHED', 'HIDDEN', 'REJECTED', 'WITHDRAWN']) expect(decisionsFor(state)).not.toContain('REQUEST_CHANGES');
+  });
+  it('gives every reason a Bangla and an English text and a 2 to 60 character code', () => {
+    for (const list of Object.values(REASONS)) for (const r of list) {
+      expect(r.bn.length).toBeGreaterThan(0);
+      expect(r.en.length).toBeGreaterThan(0);
+      expect(r.code.length).toBeGreaterThanOrEqual(2);
+      expect(r.code.length).toBeLessThanOrEqual(60);
+    }
+  });
+});
+
+describe('keeping staff screens fresh (no notification or queue delay)', () => {
+  it('polls the queue at least every 10 seconds and the inbox at least every 30', () => {
+    expect(QUEUE_POLL_MS).toBeLessThanOrEqual(10_000);
+    expect(INBOX_POLL_MS).toBeLessThanOrEqual(30_000);
+  });
+
+  it('loads at once, on a timer while visible, and when the tab is shown again, and stops on cleanup', () => {
+    const listeners: Record<string, () => void> = {};
+    vi.useFakeTimers();
+    const doc = { hidden: false, addEventListener: (n: string, f: () => void) => (listeners[n] = f), removeEventListener: (n: string) => delete listeners[n] };
+    const win = { setInterval: (f: () => void, ms: number) => setInterval(f, ms), clearInterval: (id: number) => clearInterval(id), addEventListener: (n: string, f: () => void) => (listeners[`w${n}`] = f), removeEventListener: (n: string) => delete listeners[`w${n}`] };
+    vi.stubGlobal('document', doc);
+    vi.stubGlobal('window', win);
+    const load = vi.fn();
+    const stop = keepFresh(load, 5_000);
+    expect(load).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(5_000);
+    expect(load).toHaveBeenCalledTimes(2);
+    doc.hidden = true; // a hidden tab does not poll
+    vi.advanceTimersByTime(15_000);
+    expect(load).toHaveBeenCalledTimes(2);
+    doc.hidden = false;
+    listeners.visibilitychange(); // shown again: refresh at once
+    expect(load).toHaveBeenCalledTimes(3);
+    listeners.wfocus();
+    expect(load).toHaveBeenCalledTimes(4);
+    stop();
+    vi.advanceTimersByTime(20_000);
+    expect(load).toHaveBeenCalledTimes(4);
+    expect(Object.keys(listeners)).toHaveLength(0);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 });
 

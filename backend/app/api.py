@@ -16,6 +16,7 @@ from app.abuse import CounterSessions
 from app.admin import cases
 from app.auth import csrf
 from app.auth.sessions import MemberPrincipal, OptionalPrincipal, Principal
+from app.auth.validation import public_author_name
 from app.client_address import network_digest, trusted_client_address
 from app.config import get_settings
 from app.db import get_session
@@ -435,7 +436,7 @@ def public_reviews(
             title=revision.title,
             body=revision.body,
             category_ratings=categories[revision.id],
-            author_display_name=authors.get(review.author_user_id) if review.author_user_id else None,
+            author_display_name=public_author_name(authors.get(review.author_user_id)) if review.author_user_id else None,
             media=attached.get(review.id, []),
         )
         for review, revision in rows

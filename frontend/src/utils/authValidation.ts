@@ -32,7 +32,8 @@ export function passwordProblem(value: string): FieldProblem | null {
 export function displayNameProblem(value: string): FieldProblem | null {
   const name = value.normalize('NFC').trim();
   if (!name) return 'REQUIRED';
-  return name.length > DISPLAY_NAME_MAX ? 'TOO_LONG' : null;
+  if (name.length > DISPLAY_NAME_MAX) return 'TOO_LONG';
+  return name.includes('@') ? 'INVALID_VALUE' : null; // the name is shown beside a published review, so it must not be an email
 }
 
 /** Strength hint for the password field; the API stays the judge. */

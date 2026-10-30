@@ -7,6 +7,30 @@ import { StaffError } from './api';
 import type { DecisionInput, Lang, ReportSubject } from './types';
 
 export type Decision = DecisionInput['decision'];
+
+/**
+ * How stale a staff screen may be. The server turns an event into a notification within about 2 s
+ * (`NOTIFY_POLL_SECONDS`), so these keep a new review or notice visible to a moderator within seconds
+ * without a push channel. A hidden tab does not poll; it refreshes the moment it is shown again.
+ */
+export const QUEUE_POLL_MS = 5_000;
+export const INBOX_POLL_MS = 10_000;
+
+/** Calls `load` now, every `everyMs` while the tab is visible, and again whenever the tab or window regains focus. */
+export function keepFresh(load: () => void, everyMs: number): () => void {
+  load();
+  const tick = () => {
+    if (!document.hidden) load();
+  };
+  const timer = window.setInterval(tick, everyMs);
+  document.addEventListener('visibilitychange', tick);
+  window.addEventListener('focus', tick);
+  return () => {
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', tick);
+    window.removeEventListener('focus', tick);
+  };
+}
 export type ReportMove = 'in_review' | 'actioned' | 'dismissed';
 
 /** Review status -> the decisions the server allows from it (mirrors `moderate_review`). */
@@ -14,7 +38,7 @@ export function decisionsFor(status: string): Decision[] {
   switch (status) {
     case 'PENDING':
     case 'UNDER_REVIEW':
-      return ['PUBLISH', 'REJECT'];
+      return ['PUBLISH', 'REJECT', 'REQUEST_CHANGES'];
     case 'PUBLISHED':
       return ['HIDE'];
     case 'HIDDEN':
@@ -69,6 +93,22 @@ export const REASONS: Record<Decision,{ code: string; bn: string; en: string }[]
     { code: 'legal-request', bn: 'আইনি অনুরোধ', en: 'Legal request' },
   ],
   RESTORE: [{ code: 'hidden-in-error', bn: 'ভুলে লুকানো হয়েছিল', en: 'Hidden in error' }],
+  // The author reads this reason (the receipt and the review page show it), so no private detail belongs here.
+  REQUEST_CHANGES: [
+    { code: 'remove-personal-info', bn: 'ব্যক্তিগত তথ্য সরান', en: 'Remove personal information' },
+    { code: 'add-detail', bn: 'আরও বিস্তারিত লিখুন', en: 'Add more detail' },
+    { code: 'fix-language', bn: 'ভাষা বা বানান ঠিক করুন', en: 'Fix language or spelling' },
+    { code: 'wrong-destination', bn: 'গন্তব্য বা মাস ঠিক করুন', en: 'Check the destination or month' },
+  ],
+};
+
+/** Button text for a decision (the value sent to the server is the code itself). */
+export const DECISION_LABEL: Record<Decision, { bn: string; en: string }> = {
+  PUBLISH: { bn: 'প্রকাশ করুন', en: 'Publish' },
+  REJECT: { bn: 'বাতিল করুন', en: 'Reject' },
+  HIDE: { bn: 'লুকান', en: 'Hide' },
+  RESTORE: { bn: 'ফিরিয়ে আনুন', en: 'Restore' },
+  REQUEST_CHANGES: { bn: 'সংশোধন চান', en: 'Ask for changes' },
 };
 
 export const REPORT_REASONS: Record<string, { bn: string; en: string }> = {
