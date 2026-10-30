@@ -107,11 +107,7 @@ def create_app() -> FastAPI:
         declared = request.headers.get("content-length", "")
         response: Response
         if declared.isdigit() and int(declared) > settings.max_request_body_bytes:
-<<<<<<< Updated upstream
             response = error_response(request, "PAYLOAD_TOO_LARGE")
-=======
-            response: Response = error_response(request, "PAYLOAD_TOO_LARGE")
->>>>>>> Stashed changes
         else:
             try:
                 body = bytearray()
@@ -131,12 +127,7 @@ def create_app() -> FastAPI:
             except TimeoutError:
                 logger.error("request timed out: %s %s", request.method, request.url.path)
                 response = error_response(request, "REQUEST_TIMEOUT")
-<<<<<<< Updated upstream
         # Every response, success or early-return error, carries the same headers (audit F-06).
-=======
-        # Every response, success or early-return error, carries the request id and the
-        # security headers; error bodies must not be served without nosniff/HSTS either.
->>>>>>> Stashed changes
         response.headers["X-Request-ID"] = request_id
         for name, value in SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
