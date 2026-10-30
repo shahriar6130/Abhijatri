@@ -1,0 +1,171 @@
+"""Abhijatri data flow diagrams as data (context, level 0, level 1, level 2).
+
+Names follow the code: stores map to real tables (see STORE_TABLES), processes to real modules and routes.
+Prototype parts (planner, offline packs, saved trips, booking) are marked proto=True and drawn dashed.
+"""
+
+from diagram_lib import DFD, Flow, Node
+
+N, F = Node, Flow
+
+# store id -> tables it stands for (used in the Word data dictionary and checked against models.py)
+STORE_TABLES = {
+    "D1": ("Destinations and advisories", ["destinations", "destination_guide_items", "destination_advisories", "destination_contacts"]),
+    "D2": ("Users and roles", ["users", "user_roles", "auth_session_activity", "role_admin_guard"]),
+    "D3": ("Reviews", ["reviews", "review_revisions", "review_category_ratings", "review_receipts", "review_media"]),
+    "D4": ("Rating statistics", ["destination_rating_stats", "destination_category_stats"]),
+    "D5": ("Moderation records", ["moderation_tasks", "moderation_actions", "reports", "appeals", "enforcement_cases", "sanctions",
+                                  "verification_cases", "verification_evidence", "verifications"]),
+    "D6": ("Outbox events", ["outbox_events"]),
+    "D7": ("Notifications", ["notifications", "notification_deliveries", "notification_delivery_attempts", "notification_digests",
+                             "notification_preferences", "notification_suppressions", "notification_templates", "notification_rules",
+                             "notification_provider_events"]),
+    "D8": ("Audit log", ["audit_events"]),
+    "D9": ("Abuse limits", ["rate_limit_buckets"]),  # local to 4.0
+    "D10": ("Device storage (IndexedDB)", []),  # lives in the browser, not the database; prototype for packs
+    "D11": ("Idempotency keys", ["idempotency_keys"]),  # local to 6.0
+}
+
+# ----------------------------------------------------------------------------------------------- context
+CONTEXT = DFD(
+    key="dfd-context",
+    title="Context diagram (level C): the Abhijatri platform and everything outside it",
+    level="context",
+    size=(13.0, 9.0),
+    note="One process, ten external entities. No data stores appear at this level. Member includes the Verified Member badge holder.",
+    legend=(46, 76),
+    nodes=[
+        N("0", "process", "Abhijatri platform (PWA, API, staff and ops apps)", 65, 44, 30, 15),
+        N("Guest", "entity", "Guest (traveller without an account)", 16, 76, 18, 9.6),
+        N("Member", "entity", "Member / Verified Member", 16, 53, 18, 9.6),
+        N("Moderator", "entity", "Moderator", 16, 33, 18, 9.6),
+        N("Admin", "entity", "Administrator / Superadmin", 16, 13, 18, 9.6),
+        N("Ops", "entity", "Ops operator", 114, 78, 18, 9.6),
+        N("Auth", "entity", "Supabase Auth", 114, 61, 18, 9.6),
+        N("Turnstile", "entity", "Cloudflare Turnstile", 114, 44, 18, 9.6),
+        N("Email", "entity", "Email provider (SMTP, Gmail, Brevo, Resend)", 116, 28, 18, 9.6),
+        N("Storage", "entity", "Supabase Storage", 100, 9.5, 18, 9.6),
+        N("Redis", "entity", "Upstash Redis", 65, 9, 18, 9.6),
+    ],
+    flows=[
+        F("Guest", "0", "destination requests, guest reviews, receipt operations, visit signal", off=3.1, t=0.30, wrap=30),
+        F("0", "Guest", "destination guidance, advisories, review status", off=3.1, t=0.70, wrap=30),
+        F("Member", "0", "sign-up, sign-in, reviews, edits, appeals, evidence, preferences", off=3.1, t=0.30, wrap=30),
+        F("0", "Member", "session, review history, notifications", off=3.1, t=0.70, wrap=30),
+        F("Moderator", "0", "claims, decisions, appeal and verification outcomes", off=3.1, t=0.30, wrap=30),
+        F("0", "Moderator", "review queue, case files, evidence links", off=3.1, t=0.70, wrap=30),
+        F("Admin", "0", "role grants, enforcement, notification rules and templates", off=3.1, t=0.30, wrap=30),
+        F("0", "Admin", "audit log, staff list, delivery records", off=3.1, t=0.70, wrap=30),
+        F("Ops", "0", "ops-token panel requests", off=3.1, t=0.42, wrap=22),
+        F("0", "Ops", "health, content, traffic and queue panels", off=3.1, t=0.70, wrap=30),
+        F("0", "Auth", "credentials, MFA codes", off=3.1, t=0.72, wrap=30),
+        F("Auth", "0", "signed tokens, user identity", off=3.1, t=0.28, wrap=30),
+        F("0", "Turnstile", "challenge token", off=3.1, t=0.72, wrap=30),
+        F("Turnstile", "0", "pass or fail", off=3.1, t=0.28, wrap=30),
+        F("0", "Email", "email messages", off=3.1, t=0.72, wrap=30),
+        F("Email", "0", "bounce and complaint webhooks", off=3.1, t=0.28, wrap=30),
+        F("0", "Storage", "signed upload and download requests, processed files", off=3.1, t=0.72, wrap=30),
+        F("Storage", "0", "uploaded files, links", off=3.1, t=0.28, wrap=30),
+        F("0", "Redis", "visit and event counters", off=3.1, t=0.5, wrap=14, dx=4),
+        F("Redis", "0", "counter totals", off=3.1, t=0.5, wrap=14, dx=-4),
+    ],
+)
+
+# ----------------------------------------------------------------------------------------------- level 0
+# Process numbering (used by every level-1 and level-2 diagram and by the Word documents):
+# 1.0 Browse, 2.0 Plan offline (prototype), 3.0 Accounts, 4.0 Reviews, 5.0 Notify, 6.0 Moderate and verify, 7.0 Monitor.
+# Ratings are updated inside 6.0 (moderate_review changes destination_rating_stats in the same transaction).
+L0 = DFD(
+    key="dfd-level0",
+    title="Level 0 diagram: the seven main processes of Abhijatri",
+    level="0",
+    parent="dfd-context",
+    size=(15.0, 11.2),
+    yshift=6,
+    note="Member also uses 1.0 and 2.0 with the same flows as a Guest. Dashed shapes (2.0 and D10) are prototypes, not available to users yet.",
+    legend=(70, 9),
+    note_bottom=True,
+    nodes=[
+        N("Guest", "entity", "Guest", 11, 92),
+        N("Member", "entity", "Member / Verified Member", 11, 66),
+        N("Moderator", "entity", "Moderator", 11, 22),
+        N("Admin", "entity", "Administrator / Superadmin", 11, 42),
+        N("1.0", "process", "Browse destinations and advice", 76, 98),
+        N("2.0", "process", "Plan trips offline (prototype)", 76, 85, proto=True),
+        N("3.0", "process", "Authenticate and manage accounts", 76, 72),
+        N("4.0", "process", "Submit and manage reviews", 76, 59),
+        N("5.0", "process", "Notify members and staff", 76, 46),
+        N("6.0", "process", "Moderate, verify and rate", 76, 33),
+        N("7.0", "process", "Monitor, audit and retain data", 76, 18),
+        N("D3", "store", "Reviews", 40, 46),
+        N("D8", "store", "Audit log", 40, 6),
+        N("D1", "store", "Destinations and advisories", 108, 94),
+        N("D10", "store", "Device storage (IndexedDB)", 108, 80, proto=True),
+        N("D2", "store", "Users and roles", 108, 66),
+        N("D6", "store", "Outbox events", 108, 54),
+        N("D7", "store", "Notifications", 108, 42),
+        N("D5", "store", "Moderation records", 108, 30),
+        N("D4", "store", "Rating statistics", 108, 24),
+        N("D4b", "store", "Rating statistics (duplicate)", 108, 87.5, tag="D4", dup=True),
+        N("Auth", "entity", "Supabase Auth", 139, 78),
+        N("Storage", "entity", "Supabase Storage", 139, 66),
+        N("Turnstile", "entity", "Cloudflare Turnstile", 139, 57),
+        N("Email", "entity", "Email provider", 139, 48),
+        N("Redis", "entity", "Upstash Redis", 139, 22),
+        N("Ops", "entity", "Ops operator", 139, 8),
+    ],
+    flows=[
+        F("Guest", "1.0", "destination request, visit signal", off=2.0, t=0.5, wrap=18),
+        F("1.0", "Guest", "guidance, advisories", off=2.0, t=0.5, wrap=18),
+        F("D1", "1.0", "destination data"),
+        F("D4b", "1.0", "rating summaries"),
+        F("Guest", "2.0", "trip inputs", off=2.0, t=0.5),
+        F("2.0", "Guest", "cost estimate, offline pack", off=2.0, t=0.5, wrap=18),
+        F("D1", "2.0", "price and pack data"),
+        F("2.0", "D10", "packs, trips, drafts", both=True),
+        F("Guest", "4.0", "guest review, receipt operations, appeal", t=0.3, wrap=20),
+        F("4.0", "Guest", "review status", rad=-0.2, t=0.3),
+        F("Member", "3.0", "sign-up, sign-in", off=2.0, t=0.5),
+        F("3.0", "Member", "session", off=2.0, t=0.5),
+        F("Admin", "3.0", "role grants", rad=-0.05, t=0.35),
+        F("3.0", "Admin", "staff list", rad=-0.05, t=0.35, off=2.0),
+        F("Admin", "6.0", "enforcement actions", off=2.0, t=0.5),
+        F("6.0", "Admin", "case reports", off=2.0, t=0.5),
+        F("Member", "6.0", "verification request, evidence", rad=0.12, t=0.35, wrap=18),
+        F("4.0", "D5", "moderation task, appeal, report", rad=-0.35, t=0.55, wrap=18),
+        F("Member", "4.0", "review, edit, withdraw, appeal, report", off=2.0, t=0.5, wrap=20),
+        F("4.0", "Member", "review history", off=2.0, t=0.5),
+        F("5.0", "Member", "notifications", off=2.0, t=0.5),
+        F("Member", "5.0", "email preferences", off=2.0, t=0.5),
+        F("3.0", "Auth", "credentials, MFA codes", off=2.0, t=0.72),
+        F("Auth", "3.0", "tokens, identity", off=2.0, t=0.72),
+        F("3.0", "D2", "accounts, roles", both=True),
+        F("4.0", "Turnstile", "challenge token", off=2.0, t=0.72),
+        F("Turnstile", "4.0", "pass or fail", off=2.0, t=0.72),
+        F("4.0", "Storage", "media upload request", off=2.0, t=0.72),
+        F("Storage", "4.0", "stored media", off=2.0, t=0.72),
+        F("4.0", "D3", "reviews, revisions, receipts", both=True),
+        F("4.0", "D6", "review events"),
+        F("Moderator", "6.0", "claims, decisions", off=2.0, t=0.5),
+        F("6.0", "Moderator", "queue, case files", off=2.0, t=0.5),
+        F("D3", "6.0", "review data", both=True),
+        F("6.0", "D5", "decisions, cases, tasks", both=True),
+        F("6.0", "D4", "rating totals", both=True),
+        F("6.0", "D6", "decision events", rad=-0.15),
+        F("6.0", "Storage", "signed link requests", off=2.0, t=0.7),
+        F("Storage", "6.0", "evidence files", off=2.0, t=0.7),
+        F("6.0", "D8", "audit records", rad=0.0, t=0.5),
+        F("D6", "5.0", "events", both=True),
+        F("5.0", "D7", "notifications", both=True),
+        F("5.0", "Email", "email messages", off=2.0, t=0.72),
+        F("Email", "5.0", "bounce webhooks", off=2.0, t=0.72),
+        F("Ops", "7.0", "panel requests", off=2.0, t=0.5),
+        F("7.0", "Ops", "health and usage panels", off=2.0, t=0.5, wrap=18),
+        F("7.0", "Redis", "event counters", off=2.0, t=0.7),
+        F("Redis", "7.0", "counter totals", off=2.0, t=0.7),
+        F("D8", "7.0", "audit data"),
+        F("7.0", "Admin", "audit log, delivery records", t=0.3, wrap=18, rad=0.1),
+    ],
+)
+
+
