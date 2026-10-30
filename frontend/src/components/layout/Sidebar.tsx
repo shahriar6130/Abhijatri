@@ -177,6 +177,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               <Link to="/account/verification" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
                 {isVerifiedMember ? t('যাচাইকৃত সদস্য ✓', 'Verified Member ✓') : t('যাচাইকৃত সদস্য হোন', 'Become a Verified Member')}
               </Link>
+              <Link to="/account/reviews" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('আমার রিভিউ', 'My reviews')}
+              </Link>
               <Link to="/account/appeals" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
                 {t('আপিল', 'Appeals')}
               </Link>

@@ -28,6 +28,7 @@ export function problemMessage(field: 'email' | 'password' | 'display_name', pro
       if (problem === 'SAME_PASSWORD') return t('নতুন পাসওয়ার্ড বর্তমানটির থেকে আলাদা হতে হবে।', 'The new password must be different from your current one.');
       return t('অন্তত একটি অক্ষর ও একটি সংখ্যা থাকতে হবে।', 'Include at least one letter and one number.');
     default:
+      if (problem === 'INVALID_VALUE') return t('নাম ইমেইল ঠিকানা হতে পারবে না। আপনার নাম লিখুন।', 'A name cannot be an email address. Enter your name.');
       return problem === 'REQUIRED' ? t('আপনার নাম দিন।', 'Enter your name.') : t('নাম ৮০ অক্ষরের বেশি হতে পারবে না।', 'A name can be at most 80 characters.');
   }
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getInbox, markInboxAllRead, markInboxRead } from '../api';
-import { errorText } from '../logic';
+import { INBOX_POLL_MS, errorText, keepFresh } from '../logic';
 import type { InboxItem, Lang } from '../types';
 import { Notice, makeT } from '../ui';
 
@@ -28,11 +28,8 @@ export function Inbox({ lang }: { lang: Lang }) {
     }
   }, [lang]);
 
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 30_000); // the inbox is the source of truth: poll it
-    return () => window.clearInterval(timer);
-  }, [load]);
+  // The inbox is the source of truth: poll it often while visible and refresh on focus.
+  useEffect(() => keepFresh(() => void load(), INBOX_POLL_MS), [load]);
 
   const more = async () => {
     if (!cursor) return;

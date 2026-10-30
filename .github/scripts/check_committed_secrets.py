@@ -18,6 +18,13 @@ ALLOWED_DOCUMENTS = {
     "Docs/Abhijatri Project Gantt — CSE 3102.xlsx",
     "Docs/Abhijatri_Project_Proposal.pdf",
     "Security_Abhijatra.pdf",
+    # Generated from repository documents; the full text was scanned for credentials, connection strings,
+    # keys and email addresses on 30 October 2026 (no hit).
+    "Docs/Abhijatri-DFD.docx",
+    "Docs/Abhijatri-SRS-Completion.docx",
+    "Docs/Abhijatri-Proposal-Judging-Checklist.docx",
+    "Docs/Abhijatri-Venn-Diagram.docx",
+    "Docs/Review-Frontend-Manual-Test-Cases.docx",
 }
 DOCUMENT_SUFFIXES = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "redis", "h"}

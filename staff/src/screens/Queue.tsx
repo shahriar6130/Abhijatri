@@ -7,10 +7,13 @@ import {
   RELOAD_CODES,
   decisionsFor,
   errorText,
+  QUEUE_POLL_MS,
   formatCountdown,
+  keepFresh,
   newIdempotencyKey,
   reportMoves,
   secondsLeft,
+  DECISION_LABEL,
   type Decision,
   type ReportMove,
 } from '../logic';
@@ -30,7 +33,6 @@ interface Lease {
   expiresAt: string;
 }
 
-const POLL_MS = 30_000;
 const HEARTBEAT_MS = 60_000;
 
 /** The work queue: pick a task, claim it (a 5-minute lease), decide, and the next one appears. */
@@ -64,11 +66,8 @@ export function Queue({ lang, role, userId }: Props) {
     }
   }, [filter, lang, userId]);
 
-  useEffect(() => {
-    void load();
-    const poll = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(poll);
-  }, [load]);
+  // A new review must reach a moderator within seconds: poll often while visible, refresh on focus.
+  useEffect(() => keepFresh(() => void load(), QUEUE_POLL_MS), [load]);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 1000);
@@ -515,7 +514,7 @@ function DecisionForm({ lang, item, subject, lease, busy, run }: FormProps & { s
       <div className="segmented" role="group">
         {options.map((option) => (
           <button key={option} type="button" aria-pressed={decision === option} onClick={() => { setDecision(option); setReason(''); }}>
-            {option}
+            {t(DECISION_LABEL[option].bn, DECISION_LABEL[option].en)}
           </button>
         ))}
       </div>
@@ -544,6 +543,11 @@ function DecisionForm({ lang, item, subject, lease, busy, run }: FormProps & { s
             <p className="small">{t(`${rejectedMedia.length}টি প্রকাশ হবে না।`, `${rejectedMedia.length} will not be published.`)}</p>
           )}
         </fieldset>
+      )}
+      {decision === 'REQUEST_CHANGES' && (
+        <p className="small muted">
+          {t('লেখক কারণটি দেখতে পাবেন এবং সম্পাদনা করে আবার জমা দিতে পারবেন। কারণে কোনো ব্যক্তিগত তথ্য লিখবেন না।', 'The author can read the reason and edit the review to send it back. Do not put private details in the reason.')}
+        </p>
       )}
       {decision === 'REJECT' && media.length > 0 && (
         <p className="small muted">{t('রিভিউ বাতিল হলে সব ছবি ও ভিডিও বাতিল হবে।', 'Rejecting the review rejects all its photos and video.')}</p>

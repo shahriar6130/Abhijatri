@@ -32,6 +32,7 @@ describe('displayNameProblem', () => {
     expect(displayNameProblem('   ')).toBe('REQUIRED');
     expect(displayNameProblem('x'.repeat(81))).toBe('TOO_LONG');
     expect(displayNameProblem('রাফি')).toBeNull();
+    expect(displayNameProblem('nila@example.com')).toBe('INVALID_VALUE');
   });
 });
 

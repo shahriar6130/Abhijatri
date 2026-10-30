@@ -27,6 +27,12 @@ def normalize_display_name(value: str) -> str:
     return unicodedata.normalize("NFC", value).strip()
 
 
+def public_author_name(name: str | None) -> str | None:
+    """The name shown beside a published review. An email address is never public, so a name that
+    contains "@" (an older account whose name was its sign-in email) is withheld and the page says "Member"."""
+    return None if name is None or "@" in name else name
+
+
 def _folds(value: str) -> set[str]:
     base = unicodedata.normalize("NFKC", value).casefold()
     return {re.sub(r"[^a-zঀ-৿]", "", base.translate(table)) for table in (_CONFUSABLE_I, _CONFUSABLE_L)}
@@ -74,6 +80,8 @@ def validate_registration(email: str, password: str, display_name: str) -> None:
         errors.append({"field": "password", "code": problem})
     if not 1 <= len(display_name) <= DISPLAY_NAME_MAX:
         errors.append({"field": "display_name", "code": "TOO_SHORT" if not display_name else "TOO_LONG"})
+    elif "@" in display_name:  # a name that is an email address would be published beside the review
+        errors.append({"field": "display_name", "code": "INVALID_VALUE"})
     if errors:
         raise ApiError("VALIDATION_FAILED", field_errors=errors)
     if is_reserved(display_name):

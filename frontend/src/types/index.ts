@@ -274,6 +274,9 @@ export interface GuestReviewCreated {
   duplicate_recovered: boolean;
 }
 
+/** State of the appeal against a decision on a review (API.md 5.3, 5.6). */
+export type ReviewAppealState = 'received' | 'in_review' | 'upheld' | 'overturned';
+
 export interface ReceiptStatus {
   review_id: string;
   status: ReviewStatus;
@@ -281,6 +284,95 @@ export interface ReceiptStatus {
   published_at: string | null;
   decision_reason: string | null;
   appeal_deadline: string | null;
+  /** null until an appeal is filed. */
+  appeal_state?: ReviewAppealState | null;
+}
+
+/** One row of `GET /reviews/mine` (API.md 5.5a). */
+export interface ReviewSummary {
+  id: string;
+  destination_id: string;
+  status: ReviewStatus;
+  version: number;
+  overall_rating: number;
+  title: string;
+  visit_month: string;
+  created_at: string;
+  published_at: string | null;
+  appeal_deadline: string | null;
+}
+
+export interface MyReviews {
+  items: ReviewSummary[];
+  next_cursor: string | null;
+}
+
+export interface OwnerMedia {
+  id: string;
+  kind: 'image' | 'video';
+  state: string;
+  alt_text: string;
+  caption: string | null;
+}
+
+export interface RevisionInfo {
+  sequence: number;
+  status: string;
+  created_at: string;
+}
+
+/** `GET /reviews/{id}`: the author's (or a moderator's) full view; never cached. */
+export interface ReviewDetail {
+  id: string;
+  destination_id: string;
+  author_type: 'GUEST' | 'MEMBER';
+  status: ReviewStatus;
+  version: number;
+  rating_eligibility: string;
+  language: ReviewLanguage;
+  traveller_type: TravellerType;
+  comfort_tier: ComfortTier;
+  /** `YYYY-MM-DD`, always the first of the month. */
+  visit_month: string;
+  title: string;
+  body: string;
+  overall_rating: number;
+  category_ratings: CategoryRatings;
+  consent_version: string;
+  created_at: string;
+  published_at: string | null;
+  withdrawn_at: string | null;
+  decision_reason: string | null;
+  appeal_deadline: string | null;
+  appeal_state: ReviewAppealState | null;
+  revisions: RevisionInfo[];
+  media: OwnerMedia[];
+}
+
+/** Changed fields only (API.md 5.5); omitted means "keep". `null` is never sent. */
+export interface ReviewEditChanges {
+  language?: ReviewLanguage;
+  traveller_type?: TravellerType;
+  comfort_tier?: ComfortTier;
+  visit_month?: string;
+  title?: string;
+  body?: string;
+  overall_rating?: number;
+  /** When present it replaces the whole set; `{}` clears it. */
+  category_ratings?: CategoryRatings;
+}
+
+export interface ReviewEdited {
+  review_id: string;
+  status: ReviewStatus;
+  version: number;
+  revision: number;
+}
+
+export interface GuestAppealCreated {
+  appeal_id: string;
+  status: 'OPEN';
+  deadline_at: string;
 }
 
 // ---------------------------------------------------------------------------

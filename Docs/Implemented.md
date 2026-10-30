@@ -71,3 +71,12 @@ Full account: [`Docs/Frontend-Implemented.md`](Frontend-Implemented.md). Evidenc
 | Verified Member video | Proposed amendment A4, not approved | `Features/Review.md` 13.1 |
 | Community | Design only | `Features/Community.md` |
 | Turnstile widget, member review path, review filters, offline drafts, PWA shell, staff build | Not implemented | `Docs/Frontend-Implemented.md` section 8 |
+
+## Proposal, SRS and diagram documents (30 October 2026)
+
+Word documents prepared for the course evaluation, with their sources and generators in `Docs/diagrams/`:
+
+- `Docs/Abhijatri-DFD.docx`: how to draw data flow diagrams, tools, and the Abhijatri context, level 0, level 1 and level 2 diagrams with data dictionary and balancing proof.
+- `Docs/Abhijatri-SRS-Completion.docx`: coverage of the nine required proposal points, SRS gap analysis, and the missing SRS sections ready to paste.
+- `Docs/Abhijatri-Proposal-Judging-Checklist.docx`: judge's rubric with scores, tick-box checks and an improvement plan.
+- `Docs/Abhijatri-Venn-Diagram.docx`: three Venn diagrams and how to draw them.
