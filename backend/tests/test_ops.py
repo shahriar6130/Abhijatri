@@ -74,6 +74,7 @@ ROUTES = [
     ("GET", "/api/v1/ops/overview"),
     ("POST", "/api/v1/ops/jobs/visit-rollup"),
     ("POST", "/api/v1/ops/jobs/rating-reconciliation"),
+    ("POST", "/api/v1/ops/jobs/retention"),
 ]
 
 

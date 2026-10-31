@@ -5,6 +5,7 @@ by the dependency; here the target and the claim lease are locked and validated,
 action and audit rows are written, any event is queued, and the route commits once.
 """
 
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -13,15 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import media
+from app import media, reasons, report_reasons
 from app.admin import audit, tasks
+from app.admin.cases import ensure_not_restricted, open_enforcement
 from app.auth.sessions import Principal
 from app.eligibility import SERIOUS_REPORT_REASONS
 from app.errors import ApiError
 from app.models import ModerationDecision, OutboxEvent, Report, Review, ReviewStatus
 from app.services import ReviewError, moderate_review, recheck_rating, set_review_conflict
-
-REPORT_REASONS = ("spam", "offensive", "false_information", "privacy", "conflict_of_interest", "other")
 
 # state -> states it may move to (the authoritative table for reports, spec 7)
 REPORT_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -29,6 +29,12 @@ REPORT_TRANSITIONS: dict[str, frozenset[str]] = {
     "in_review": frozenset({"actioned", "dismissed"}),
 }
 REPORT_FINAL = frozenset({"actioned", "dismissed"})
+
+
+def require_reason(group: str, code: str) -> None:
+    """A decision's reason must come from the server's catalogue (Moderation spec P-06) for strict groups."""
+    if not reasons.is_valid(group, code):
+        raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "reason_code", "code": "INVALID_VALUE"}])
 
 
 def translate(error: ReviewError) -> ApiError:
@@ -52,6 +58,7 @@ def moderate_submission(
     request_id: str | None,
     rejected_media_ids: set[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
+    require_reason(reasons.DECISION_GROUP[decision.value], reason_code)
     task = tasks.require_lease(session, principal, task_id, lease_token)
     if task.task_type == "review_moderation":
         linked = task.subject_id == review_id
@@ -140,33 +147,91 @@ def change_conflict(
     return {"review_id": str(review.id), "status": review.status.value, "version": review.version, "counted_rating": review.counted_rating}
 
 
-# ---- reports (member side) ----
+# ---- reports (member and anonymous side) ----
+
+CONTACT_EMAIL = re.compile(r"[^@\s]{1,64}@[^@\s]{1,150}\.[^@\s]{2,30}")
+CONTACT_PHONE = re.compile(r"\+?\(?[0-9][0-9 \-()]{6,24}[0-9]")
+
+
+def clean_contact(value: str | None, *, required: bool = False) -> str | None:
+    """An email address or a phone number, or None. Anything else is refused: this field is personal data
+    and is kept only for a follow-up (erased 30 days after the report is closed)."""
+    text = (value or "").strip()
+    if not text:
+        if required:
+            raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "contact", "code": "REQUIRED"}])
+        return None
+    if not (CONTACT_EMAIL.fullmatch(text) or CONTACT_PHONE.fullmatch(text)):
+        raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "contact", "code": "INVALID_VALUE"}])
+    return text
+
+
+def _queue(session: Session, report: Report) -> None:
+    tasks.ensure_task(session, "report", report.id, priority=report_reasons.priority(report.reason_code))
+    session.add(
+        OutboxEvent(
+            topic="report.created",
+            aggregate_id=report.id,
+            payload={"report_id": str(report.id), "review_id": str(report.review_id), "reason_code": report.reason_code},
+        )
+    )
 
 
 def create_report(session: Session, reporter: Principal, *, review_id: uuid.UUID, reason_code: str, details: str | None) -> Report:
+    reason = report_reasons.normalise(reason_code)
+    if reason is None:
+        raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "reason_code", "code": "INVALID_VALUE"}])
+    ensure_not_restricted(session, reporter.user.id)
     review = session.get(Review, review_id)
     if review is None or review.status != ReviewStatus.PUBLISHED:
         raise ApiError("NOT_FOUND")  # only published reviews can be reported; others are not disclosed
     if review.author_user_id == reporter.user.id:
         raise ApiError("FORBIDDEN")
-    report = Report(review_id=review_id, reporter_user_id=reporter.user.id, reason_code=reason_code, details=details)
+    report = Report(
+        review_id=review_id, reporter_user_id=reporter.user.id, source="member", reason_code=reason, details=details,
+        severity=report_reasons.priority(reason),
+    )
     try:
         with session.begin_nested():
             session.add(report)
             session.flush()
     except IntegrityError as error:
         raise ApiError("DUPLICATE_OPEN_REPORT") from error
-    tasks.ensure_task(session, "report", report.id, priority=1)
-    session.add(
-        OutboxEvent(
-            topic="report.created",
-            aggregate_id=report.id,
-            payload={"report_id": str(report.id), "review_id": str(review_id), "reason_code": reason_code},
-        )
+    _queue(session, report)
+    audit.record(
+        session, actor=reporter, action="report.create", target_type="report", target_id=report.id, reason=reason,
+        metadata={"review_id": str(review_id), "priority": report.severity},
     )
-    if reason_code in SERIOUS_REPORT_REASONS:
+    if reason in SERIOUS_REPORT_REASONS:
         recheck_rating(session, review_id)  # a serious open report takes the review out of the rating (Review.md 6.1)
     return report
+
+
+def create_anonymous_report(
+    session: Session, *, review_id: uuid.UUID, reason: str, details: str | None, contact: str | None, scope: bytes
+) -> bool:
+    """A visitor's report. Returns whether a row was made; the caller answers the same either way, so the response
+    never tells an attacker whether a review exists or a report was already filed."""
+    review = session.get(Review, review_id)
+    if review is None or review.status != ReviewStatus.PUBLISHED:
+        return False
+    report = Report(
+        review_id=review_id, reporter_user_id=None, source="anonymous", reporter_scope_hash=scope, contact=contact,
+        reason_code=reason, details=details, severity=report_reasons.priority(reason),
+    )
+    try:
+        with session.begin_nested():
+            session.add(report)
+            session.flush()
+    except IntegrityError:
+        return False  # the same visitor already has this review's report open
+    _queue(session, report)
+    # The scope digest, the contact and the free text never go into the audit log.
+    audit.record(
+        session, actor=None, action="removal_request.create" if reason == report_reasons.REMOVAL_REQUEST else "report.create_anonymous",
+        target_type="report", target_id=report.id, reason=reason, metadata={"review_id": str(review_id), "has_contact": contact is not None},
+    )
+    return True
 
 
 # ---- reports (staff side) ----
@@ -185,6 +250,7 @@ def transition_report(
     lease_token: uuid.UUID,
     request_id: str | None,
 ) -> dict[str, Any]:
+    require_reason("report_resolution", reason_code)
     report = session.scalar(select(Report).where(Report.id == report_id).with_for_update())
     if report is None:
         raise ApiError("NOT_FOUND")
@@ -216,7 +282,83 @@ def transition_report(
         OutboxEvent(
             topic="report.state_changed",
             aggregate_id=report.id,
-            payload={"report_id": str(report.id), "state": to, "version": report.version, "reporter_id": str(report.reporter_user_id)},
+            payload={"report_id": str(report.id), "state": to, "version": report.version, "reporter_id": str(report.reporter_user_id) if report.reporter_user_id else None},
         )
     )
     return {"report_id": str(report.id), "state": report.state, "version": report.version}
+
+
+# ---- hide pending a decision (Review.md 5.4) and reopen (Moderation spec P-03) ----
+
+
+def hide_pending_decision(
+    session: Session,
+    principal: Principal,
+    *,
+    report_id: uuid.UUID,
+    expected_version: int,
+    reason_code: str,
+    counts_toward_rating: bool,
+    task_id: uuid.UUID,
+    lease_token: uuid.UUID,
+    request_id: str | None,
+) -> dict[str, Any]:
+    """Take a reported review off the public site until a moderator records a decision.
+
+    This is a takedown case (so the author hears about it, may appeal, and the follow-up is tracked) opened from the
+    report the moderator is holding. The report moves to ``in_review``; resolving it is a separate, recorded step.
+    A moderator chooses this; nothing hides a review automatically, so a pile of reports cannot be used as a weapon.
+    """
+    require_reason("hide", reason_code)
+    report = session.scalar(select(Report).where(Report.id == report_id).with_for_update())
+    if report is None:
+        raise ApiError("NOT_FOUND")
+    task = tasks.require_lease(session, principal, task_id, lease_token, report_id)
+    if report.version != expected_version:
+        raise ApiError("REVIEW_VERSION_CONFLICT")
+    if report.state not in ("open", "in_review"):
+        raise ApiError("TRANSITION_NOT_ALLOWED")
+    case = open_enforcement(
+        session, principal, review_id=report.review_id, user_id=None, reason_code=reason_code, note=report.reason_code,
+        emergency=False, counts_toward_rating=counts_toward_rating, sanction=None, request_id=request_id,
+    )
+    previous = report.state
+    report.state, report.version = "in_review", report.version + 1
+    audit.record(
+        session, actor=principal, action="report.hide_pending", target_type="report", target_id=report.id, reason=reason_code,
+        metadata={"from": previous, "to": report.state, "version": report.version, "review_id": str(report.review_id),
+                  "case_id": str(case.id), "counts_toward_rating": counts_toward_rating, "task_id": str(task.id)},
+        request_id=request_id,
+    )
+    review = session.get(Review, report.review_id)
+    assert review is not None
+    return {
+        "report_id": str(report.id), "state": report.state, "version": report.version, "case_id": str(case.id),
+        "review_status": review.status.value, "review_version": review.version, "counted_rating": review.counted_rating,
+    }
+
+
+def reopen_review(
+    session: Session,
+    principal: Principal,
+    *,
+    review_id: uuid.UUID,
+    expected_version: int,
+    reason_code: str,
+    note: str | None,
+    request_id: str | None,
+) -> dict[str, Any]:
+    """A superadmin sends a rejected review back to the queue within 30 days of the rejection."""
+    require_reason("reopen", reason_code)
+    try:
+        review = moderate_review(
+            session, review_id=review_id, actor_user_id=principal.user.id, expected_version=expected_version,
+            decision=ModerationDecision.REOPEN, reason_code=reason_code, note=note, request_id=request_id,
+        )
+    except ReviewError as error:
+        raise translate(error) from error
+    audit.record(
+        session, actor=principal, action="review.reopen", target_type="review", target_id=review_id, reason=reason_code,
+        metadata={"from": "REJECTED", "to": review.status.value, "version": review.version}, request_id=request_id,
+    )
+    return {"review_id": str(review.id), "status": review.status.value, "version": review.version}

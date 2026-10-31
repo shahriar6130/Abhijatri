@@ -14,6 +14,7 @@ from app import abuse, media, visits
 from app import review_parameters as rp
 from app.abuse import CounterSessions
 from app.admin import cases
+from app.admin.cases import ensure_not_restricted
 from app.auth import csrf
 from app.auth.sessions import MemberPrincipal, OptionalPrincipal, Principal
 from app.auth.validation import public_author_name
@@ -569,6 +570,7 @@ def edit_unpublished_review(
     """Edit a review that is still PENDING or CHANGES_REQUESTED as a new revision (API.md 5.5)."""
     if payload.receipt_secret is None:
         owner = _owner_session(request, principal)
+        ensure_not_restricted(session, owner.user.id)  # a restricted or suspended member cannot post (spec 6.4)
         try:
             outcome = edit_pending_review(session, review_id, payload, author_id=owner.user.id)
             session.commit()

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { assignTask, claimTask, decide, escalateTask, getQueue, getStaff, heartbeatTask, releaseTask, reviewMediaUrl, transitionReport } from '../api';
+import { assignTask, claimTask, decide, escalateTask, getQueue, getStaff, heartbeatTask, hidePending, releaseTask, reviewMediaUrl, transitionReport } from '../api';
 import {
+  DECISION_GROUP,
   REASONS,
   REPORT_REASONS,
   REPORT_RESOLUTIONS,
@@ -11,6 +12,7 @@ import {
   formatCountdown,
   keepFresh,
   newIdempotencyKey,
+  reasonsFor,
   reportMoves,
   secondsLeft,
   DECISION_LABEL,
@@ -19,6 +21,7 @@ import {
 } from '../logic';
 import { StaffError } from '../api';
 import type { Lang, QueueItem, ReportSubject, ReviewMedia, ReviewSubject, Role } from '../types';
+import { useReasonCatalogue } from '../reasons';
 import { Notice, makeT } from '../ui';
 import { AppealBody, AppealForm, EnforcementBody, EnforcementFollowUp, VerificationBody, VerificationForm } from './CaseForms';
 
@@ -416,17 +419,24 @@ function MediaPreview({ reviewId, media, lang }: { reviewId: string; media: Revi
 
 function ReportBody({ subject, lang }: { subject: ReportSubject; lang: Lang }) {
   const t = makeT(lang);
-  const reason = REPORT_REASONS[subject.reason_code];
+  const reason = subject.reason_label ?? REPORT_REASONS[subject.reason_code];
   return (
     <div className="stack">
       <div className="content-box">
         <div className="row small muted">
           <span className="tag">{subject.state}</span>
+          {(subject.priority ?? 1) >= 2 && <span className="tag" data-testid="priority">{t('জরুরি', 'High priority')}</span>}
           <span>
             {t('কারণ', 'Reason')}: {reason ? (lang === 'bn' ? reason.bn : reason.en) : subject.reason_code}
           </span>
+          <span>{subject.source === 'anonymous' ? t('বেনামী রিপোর্ট', 'Anonymous report') : t('সদস্যের রিপোর্ট', 'Member report')}</span>
         </div>
         {subject.details && <p className="content-text">{subject.details}</p>}
+        {subject.contact && (
+          <p className="small" data-testid="contact">
+            {t('যোগাযোগ (শুধু কর্মীদের জন্য)', 'Contact (staff only)')}: {subject.contact}
+          </p>
+        )}
       </div>
       <div className="content-box">
         <div className="row small muted">
@@ -479,7 +489,8 @@ function DecisionForm({ lang, item, subject, lease, busy, run }: FormProps & { s
 
   if (options.length === 0) return <Notice tone="info">{t('এই অবস্থায় কোনো সিদ্ধান্ত নেওয়া যায় না।', 'No decision is possible in this state.')}</Notice>;
   const media = subject.media ?? [];
-  const reasons = decision ? REASONS[decision] : [];
+  const catalogue = useReasonCatalogue();
+  const reasons = decision ? reasonsFor(catalogue, DECISION_GROUP[decision], REASONS[decision]) : [];
   const chosenReason = reason || reasons[0]?.code || '';
 
   const submit = () =>
@@ -565,13 +576,24 @@ function ReportForm({ lang, item, subject, lease, busy, run }: FormProps & { sub
   const t = makeT(lang);
   const moves = reportMoves(subject.state);
   const [note, setNote] = useState('');
-  const hideOptions = subject.review_status ? decisionsFor(subject.review_status).filter((d) => d === 'HIDE' || d === 'RESTORE') : [];
+  const restoreOptions = subject.review_status ? decisionsFor(subject.review_status).filter((d) => d === 'RESTORE') : [];
+  const catalogue = useReasonCatalogue();
+  const hideReasons = reasonsFor(catalogue, 'hide', REASONS.HIDE).filter((r) => r.code.endsWith('-pending') || r.code === 'policy-violation');
+  const [hideReason, setHideReason] = useState('privacy-pending');
+  const [keepRating, setKeepRating] = useState(false);
+  const canHidePending = subject.review_status === 'PUBLISHED' && (subject.state === 'open' || subject.state === 'in_review');
   const key = useRef<string | null>(null);
 
   const move = (to: ReportMove) =>
     run(async () => {
       await transitionReport(subject.report_id, { taskId: item.id, leaseToken: lease.token, expectedVersion: subject.version, to, reasonCode: REPORT_RESOLUTIONS[to].code, note });
       return t('রিপোর্ট হালনাগাদ হয়েছে।', 'Report updated.');
+    });
+
+  const hideUntilDecided = () =>
+    run(async () => {
+      await hidePending(subject.report_id, { expectedVersion: subject.version, reasonCode: hideReason, countsTowardRating: keepRating, taskId: item.id, leaseToken: lease.token });
+      return t('রিভিউ সিদ্ধান্ত না হওয়া পর্যন্ত লুকানো হয়েছে।', 'The review is hidden until a decision is recorded.');
     });
 
   const hide = (decision: Decision) =>
@@ -592,11 +614,31 @@ function ReportForm({ lang, item, subject, lease, busy, run }: FormProps & { sub
       <legend>{t('রিপোর্টের সিদ্ধান্ত', 'Report decision')}</legend>
       <label htmlFor="report-note">{t('নোট (ঐচ্ছিক)', 'Note (optional)')}</label>
       <textarea id="report-note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
-      {hideOptions.length > 0 && (
+      {canHidePending && (
+        <fieldset className="stack">
+          <legend>{t('সিদ্ধান্ত না হওয়া পর্যন্ত লুকান', 'Hide pending decision')}</legend>
+          <label htmlFor="hide-reason">{t('কারণ', 'Reason')}</label>
+          <select id="hide-reason" value={hideReason} onChange={(e) => setHideReason(e.target.value)}>
+            {hideReasons.map((option) => (
+              <option key={option.code} value={option.code}>
+                {lang === 'bn' ? option.bn : option.en}
+              </option>
+            ))}
+          </select>
+          <label>
+            <input type="checkbox" checked={keepRating} onChange={(e) => setKeepRating(e.target.checked)} /> {t('লুকানো অবস্থায়ও রেটিং গণনায় রাখুন', 'Keep its rating in the totals while hidden')}
+          </label>
+          <p className="small muted">{t('রিভিউটি জনসমক্ষে দেখা যাবে না। এটি স্বয়ংক্রিয় নয়; আপনি সিদ্ধান্ত নিচ্ছেন।', 'The review stops being public. This is your decision, never automatic.')}</p>
+          <button type="button" className="ghost" disabled={busy} onClick={() => void hideUntilDecided()}>
+            {t('এখন লুকান', 'Hide now')}
+          </button>
+        </fieldset>
+      )}
+      {restoreOptions.length > 0 && (
         <div className="row">
-          {hideOptions.map((option) => (
+          {restoreOptions.map((option) => (
             <button key={option} type="button" className="ghost" disabled={busy} onClick={() => void hide(option)}>
-              {option === 'HIDE' ? t('রিভিউ লুকান', 'Hide the review') : t('রিভিউ ফিরিয়ে আনুন', 'Restore the review')}
+              {t('রিভিউ ফিরিয়ে আনুন', 'Restore the review')}
             </button>
           ))}
         </div>

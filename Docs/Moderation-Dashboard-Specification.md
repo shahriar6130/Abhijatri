@@ -220,7 +220,7 @@ The server rejects any transition not listed. There is no generic "set status" e
 | `PENDING`, `UNDER_REVIEW` | `PUBLISH` | `PUBLISHED` | Counted |
 | `PENDING`, `UNDER_REVIEW` | `REQUEST_CHANGES` | `CHANGES_REQUESTED` (author edits and resubmits) | Not counted |
 | `PENDING`, `UNDER_REVIEW` | `REJECT` | `REJECTED` | Not counted |
-| `PUBLISHED` | `HIDE` | `HIDDEN` | Removed from the rating. A takedown with `counts_toward_rating: true` keeps it (P-00, owner decision 31 Oct) |
+| `PUBLISHED` | `HIDE` | `HIDDEN` | Removed from the rating. A takedown with `counts_toward_rating: true` keeps it (P-00, **implemented 1 Nov 2026**) |
 | `HIDDEN` | `RESTORE` | `PUBLISHED` | Counted again |
 
 Every rating change goes through the locked delta path on `destination_rating_stats`, in the same transaction as the decision.
@@ -246,7 +246,7 @@ Every rating change goes through the locked delta path on `destination_rating_st
 | Job | How it runs | Does |
 |---|---|---|
 | Notification worker | Thread in the API process, every 2 s; scanners every 60 s | Outbox to notifications and email, digests, alerts (lease expiring, queue overdue, escalations, denials). |
-| Retention | `python -m app.jobs.retention` (**no schedule yet**, P-01) | Purges decided verification evidence (24 h after approval, 30 days after rejection or withdrawal), expired notifications, processed outbox rows after 30 days; expires sanctions. Re-checks open appeals under a row lock immediately before deleting. |
+| Retention | `python -m app.jobs.retention` and `POST /ops/jobs/retention` on a daily schedule (`.github/workflows/retention.yml`, P-01 **implemented 1 Nov 2026**) | Purges decided verification evidence (24 h after approval, 30 days after rejection or withdrawal), expired notifications, processed outbox rows after 30 days; expires sanctions. Re-checks open appeals under a row lock immediately before deleting. |
 
 ### 11.4 Scaling path
 
@@ -336,13 +336,13 @@ Conventions: staff routes need a session with a role and `aal2` (non-staff `404`
 
 | ID | Change | Endpoint or job | Why |
 |---|---|---|---|
-| P-00 | **Decided 31 Oct 2026 (owner):** hidden reviews are not counted by default; a takedown with `counts_toward_rating: true` keeps the rating | In `open_enforcement` and the enforcement `actions` route, pass the flag to the rating delta path: when `true`, hiding keeps the review's counted rating (`rating_eligibility` stays eligible); when changed later, move the aggregate under the same lock. Plain `HIDE` from the queue always removes the rating. | The flag is stored today but has no effect, so the stored value and the rating can disagree. |
-| P-01 | Schedule retention and check sanction end time on every request | `POST /ops/jobs/retention` (ops token) called by a GitHub Actions cron like `visit-rollup.yml`; `_set_account_state` and `ensure_not_restricted` treat `ends_at < now` as expired and reverse it lazily | Today a suspension only ends when someone runs the job by hand. Expiry must not depend on one job. |
+| P-00 | **Decided 31 Oct 2026 (owner):** hidden reviews are not counted by default; a takedown with `counts_toward_rating: true` keeps the rating | In `open_enforcement` and the enforcement `actions` route, pass the flag to the rating delta path: when `true`, hiding keeps the review's counted rating (`rating_eligibility` stays eligible); when changed later, move the aggregate under the same lock. Plain `HIDE` from the queue always removes the rating. | The flag is stored today but has no effect, so the stored value and the rating can disagree. | **Implemented 1 Nov 2026 (R11): `services.set_hidden_rating_kept`, `moderate_review(keep_rating)`; default `false`.** |
+| P-01 | Schedule retention and check sanction end time on every request | `POST /ops/jobs/retention` (ops token) called by a GitHub Actions cron like `visit-rollup.yml`; `_set_account_state` and `ensure_not_restricted` treat `ends_at < now` as expired and reverse it lazily | Today a suspension only ends when someone runs the job by hand. Expiry must not depend on one job. | **Implemented 1 Nov 2026 (R11): lazy expiry in `cases.expire_due_sanctions` and the session check; `POST /ops/jobs/retention` and a daily workflow.** |
 | P-02 | Verified Members list; new moderators must be Verified Members | `GET /admin/members?verified=true&q=&after=&limit=` (superadmin); `POST /admin/staff/{id}/role` returns `422 NOT_VERIFIED_MEMBER` for `moderator` | Owner design: moderators are chosen from verified members. |
-| P-03 | Rejected and Hidden lists with 30-day recovery for reviews | `GET /admin/reviews?status=REJECTED\|HIDDEN&after=&limit=` (staff), each with `recoverable_until`; `POST /admin/submissions/{id}/moderation-actions` `REOPEN` (`REJECTED → PENDING`, superadmin, within 30 days); retention purges rejected review bodies and media after 30 days unless an appeal is open | Owner design: "Rejected" and "Hidden" segments, 30-day retrieval. |
+| P-03 | Rejected and Hidden lists with 30-day recovery for reviews | `GET /admin/reviews?status=REJECTED\|HIDDEN&after=&limit=` (staff), each with `recoverable_until`; `POST /admin/submissions/{id}/moderation-actions` `REOPEN` (`REJECTED → PENDING`, superadmin, within 30 days); retention purges rejected review bodies and media after 30 days unless an appeal is open | Owner design: "Rejected" and "Hidden" segments, 30-day retrieval. | **Implemented 1 Nov 2026 (R11): `GET /admin/reviews`, `POST /admin/reviews/{id}/reopen` (a separate route, superadmin), retention purge.** |
 | P-04 | Moderators see fellow moderators | `GET /admin/staff` open to moderators with `display_name` and `role` only (no email) | Owner design. |
 | P-05 | Superadmin reopens a rejected verification within 30 days | `POST /admin/verification-cases/{id}/reopen` (`rejected → in_review`, reason required) | Today only an appeal can reverse it. |
-| P-06 | Explicit reason codes catalogue | `GET /admin/reason-codes` from one server list | Consistent decisions; the UI stops hard-coding codes. |
+| P-06 | Explicit reason codes catalogue | `GET /admin/reason-codes` from one server list | Consistent decisions; the UI stops hard-coding codes. | **Implemented 1 Nov 2026 (R11): `GET /admin/reason-codes`; strict groups for decisions, report resolutions, hide and reopen.** |
 
 ## 13. Errors
 
@@ -422,7 +422,7 @@ The Notification tables are listed in the Notification spec, Part C.
 |---|---|---|
 | Verification evidence, approved case | 24 hours after approval | File deleted |
 | Rejected or withdrawn verification case and evidence | 30 days | Row and files deleted (unless an appeal is open) |
-| Rejected review | Indefinitely today | **Planned** P-03: body and media purged after 30 days unless appealed |
+| Rejected review | 30 days from the rejection | **Implemented 1 Nov 2026 (P-03):** title, body and media are purged by the retention job unless an appeal is open; `reviews.purged_at` records it |
 | Sanctions, enforcement cases, appeals, moderation actions | Kept (account history) | Revisit with a privacy review |
 | Audit events | Kept, append-only | Partition and archive when large (11.4) |
 | Notifications | 90 days; critical 24 months; longer while an appeal is open | Deleted |

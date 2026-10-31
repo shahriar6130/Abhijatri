@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
 from app.admin import audit
@@ -47,6 +47,8 @@ from app.services import _lock_stats, recheck_rating
 
 Pair = tuple[int, int]  # (sum, count)
 COUNTED_STATES = (RatingEligibility.ELIGIBLE, RatingEligibility.INELIGIBLE_GUEST)
+# A review counts while it is public, or while it is hidden by a takedown that keeps its rating (Moderation spec P-00).
+COUNTING_STATUSES = (ReviewStatus.PUBLISHED, ReviewStatus.HIDDEN)
 
 
 # ---- verification revoked for abuse (Review.md 6.3) ----
@@ -131,7 +133,7 @@ class _Expected:
 
 def _expected_totals(session: Session, destination_id: uuid.UUID | None) -> dict[uuid.UUID, _Expected]:
     """What the totals must be, summed from the review rows that currently count."""
-    counted = [Review.status == ReviewStatus.PUBLISHED, Review.counted_rating.is_not(None)]
+    counted: list[ColumnElement[bool]] = [Review.status.in_(COUNTING_STATUSES), Review.counted_rating.is_not(None)]
     if destination_id is not None:
         counted.append(Review.destination_id == destination_id)
     expected: dict[uuid.UUID, _Expected] = defaultdict(_Expected)
@@ -168,7 +170,7 @@ def _review_row_drifts(session: Session, destination_id: uuid.UUID | None) -> li
     counts_wrongly = select(Review.id, Review.destination_id).where(
         *scope,
         Review.counted_rating.is_not(None),
-        (Review.status != ReviewStatus.PUBLISHED) | Review.rating_eligibility.not_in(COUNTED_STATES),
+        Review.status.not_in(COUNTING_STATUSES) | Review.rating_eligibility.not_in(COUNTED_STATES),
     )
     missing_count = select(Review.id, Review.destination_id).where(
         *scope,

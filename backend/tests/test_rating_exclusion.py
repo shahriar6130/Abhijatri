@@ -9,6 +9,7 @@ with a full recomputation.
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 import test_auth as support
@@ -58,6 +59,10 @@ pytestmark = pytest.mark.integration
 
 
 # ---- builders ----
+
+
+def _dhaka_today() -> date:
+    return datetime.now(ZoneInfo("Asia/Dhaka")).date()
 
 
 def _destination(session: Session, name: str = "Sajek") -> Destination:
@@ -259,7 +264,8 @@ def test_verification_expiry_after_publication_does_not_uncount(postgres_session
 
 def test_a_future_visit_month_is_not_counted(postgres_session: Session, moderator: User) -> None:
     destination, member = _destination(postgres_session), _verified_member(postgres_session)
-    review = _review(postgres_session, destination, member, month=(date.today().replace(day=1) + timedelta(days=40)).replace(day=1))
+    next_month = (_dhaka_today().replace(day=1) + timedelta(days=32)).replace(day=1)  # the app counts months in Dhaka time
+    review = _review(postgres_session, destination, member, month=next_month)
     _publish(postgres_session, review, moderator)
     assert review.rating_eligibility == RatingEligibility.INELIGIBLE_INVALID and review.counted_rating is None
     assert _stats(postgres_session, destination) == ((0, 0), (0, 0))
@@ -275,7 +281,7 @@ def test_a_review_without_text_is_not_counted(postgres_session: Session, moderat
 
 def test_the_current_month_is_allowed(postgres_session: Session, moderator: User) -> None:
     destination, member = _destination(postgres_session), _verified_member(postgres_session)
-    review = _publish(postgres_session, _review(postgres_session, destination, member, month=date.today().replace(day=1)), moderator)
+    review = _publish(postgres_session, _review(postgres_session, destination, member, month=_dhaka_today().replace(day=1)), moderator)
     assert review.rating_eligibility == RatingEligibility.ELIGIBLE
 
 
@@ -314,7 +320,7 @@ def test_an_open_serious_report_suspends_the_rating_until_it_closes(postgres_ses
     assert _stats(postgres_session, destination) == ((5, 1), (0, 0))
 
 
-@pytest.mark.parametrize("reason", ["spam", "offensive", "false_information", "other"])
+@pytest.mark.parametrize("reason", ["spam", "harassment", "false_information", "impersonation", "copyright", "other"])
 def test_a_routine_report_does_not_touch_the_rating(postgres_session: Session, moderator: User, reason: str) -> None:
     destination, member, reporter = _destination(postgres_session), _verified_member(postgres_session), _user(postgres_session, "Reporter")
     review = _publish(postgres_session, _review(postgres_session, destination, member), moderator)

@@ -17,6 +17,7 @@ from app.abuse import CounterSessions
 from app.config import get_settings
 from app.db import get_session
 from app.errors import ApiError
+from app.jobs import retention
 from app.limits import limiter
 from app.ops.auth import require_ops_token
 from app.ops.registry import PanelContext, collect, collect_all, get_panel, panels
@@ -121,3 +122,11 @@ def rating_reconciliation(request: Request, session: Session = Depends(get_sessi
         session.rollback()
         raise
     return {"destinations_checked": result.destinations_checked, "drifts": len(result.drifts), "clean": result.clean}
+
+
+@router.post("/jobs/retention")
+@limiter.limit(OPS_RATE)
+def run_retention(request: Request) -> dict[str, int]:
+    """Idempotent daily sweep (Moderation spec 11.3, P-01): evidence, notifications, expired sanctions, rejected
+    reviews and report contacts. Called by GitHub Actions; running it twice does no harm."""
+    return retention.run()

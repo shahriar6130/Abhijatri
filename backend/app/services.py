@@ -514,9 +514,11 @@ def _add_published_rating(
     session: Session,
     review: Review,
     stats: DestinationRatingStats,
+    *,
+    assume_published: bool = False,
 ) -> None:
     """Count a published review where Review.md 6.1 says it counts, and record why when it does not."""
-    eligibility = evaluate_eligibility(session, review)
+    eligibility = evaluate_eligibility(session, review, assume_published=assume_published)
     review.rating_eligibility = eligibility
     if eligibility == RatingEligibility.INELIGIBLE_GUEST:
         stats.guest_rating_sum += review.overall_rating
@@ -557,6 +559,41 @@ def recheck_rating(session: Session, review_id: uuid.UUID) -> Review:
     return review
 
 
+REOPEN_WINDOW = timedelta(days=30)
+
+
+def last_rejection_at(session: Session, review_id: uuid.UUID) -> datetime | None:
+    """When the review was last rejected (the start of its 30-day recovery window)."""
+    return session.scalar(
+        select(func.max(ModerationActionRecord.created_at)).where(
+            ModerationActionRecord.review_id == review_id, ModerationActionRecord.decision == ModerationDecision.REJECT
+        )
+    )
+
+
+def set_hidden_rating_kept(session: Session, review_id: uuid.UUID, keep: bool) -> Review:
+    """Change whether a hidden review's rating counts (Moderation spec P-00), under the usual locks.
+
+    The review row is locked first, then the destination totals. Keeping re-checks every eligibility rule as if
+    the review were published; not keeping removes the contribution. Nothing changes when the answer is the same.
+    """
+    review = _lock_review(session, review_id)
+    if review.status != ReviewStatus.HIDDEN:
+        return review
+    counted = review.counted_rating is not None
+    if keep == counted:
+        return review
+    stats = _lock_stats(session, review.destination_id)
+    if keep:
+        _add_published_rating(session, review, stats, assume_published=True)
+    else:
+        _remove_counted_rating(session, review, stats)
+        review.rating_eligibility = RatingEligibility.INELIGIBLE_REPORTED
+    review.version += 1
+    review.updated_at = now_utc()
+    return review
+
+
 def moderate_review(
     session: Session,
     *,
@@ -568,7 +605,10 @@ def moderate_review(
     note: str | None,
     task_id: uuid.UUID | None = None,
     request_id: str | None = None,
+    keep_rating: bool = False,
 ) -> Review:
+    """Apply one moderation decision. ``keep_rating`` applies to HIDE only: a takedown opened with
+    ``counts_toward_rating`` leaves the review's counted rating in the totals (Moderation spec P-00)."""
     review = _lock_review(session, review_id)
     if review.version != expected_version:
         raise ReviewConflict("review version changed", "REVIEW_VERSION_CONFLICT")
@@ -609,15 +649,34 @@ def moderate_review(
     elif decision == ModerationDecision.HIDE:
         if review.status != ReviewStatus.PUBLISHED:
             raise ReviewConflict("only a published review can be hidden")
-        _remove_counted_rating(session, review, stats)
         review.status = ReviewStatus.HIDDEN
-        review.rating_eligibility = RatingEligibility.INELIGIBLE_REPORTED
+        if keep_rating and review.counted_rating is not None:
+            pass  # the counted rating and its eligibility stay as they are; the text just stops being public
+        elif keep_rating:
+            # A serious report had already taken the rating out; the moderator now decides it stays. Every other
+            # eligibility rule still applies, so a conflicted or unverified author's rating does not come back.
+            _add_published_rating(session, review, stats, assume_published=True)
+        else:
+            _remove_counted_rating(session, review, stats)
+            review.rating_eligibility = RatingEligibility.INELIGIBLE_REPORTED
     elif decision == ModerationDecision.RESTORE:
         if review.status != ReviewStatus.HIDDEN:
             raise ReviewConflict("only a hidden review can be restored")
         _remove_counted_rating(session, review, stats)
         review.status = ReviewStatus.PUBLISHED
         _add_published_rating(session, review, stats)
+    elif decision == ModerationDecision.REOPEN:
+        # A rejected review goes back to the queue (Moderation spec P-03). Refused once retention redacted its text
+        # or 30 days passed since the rejection; a superadmin-only route is the only caller.
+        if review.status != ReviewStatus.REJECTED:
+            raise ReviewConflict("only a rejected review can be reopened")
+        rejected_at = last_rejection_at(session, review.id)
+        if review.purged_at is not None or rejected_at is None or now_utc() - rejected_at > REOPEN_WINDOW:
+            raise ReviewConflict("the reopen window has closed", "REOPEN_WINDOW_CLOSED")
+        review.status = ReviewStatus.PENDING
+        review.rating_eligibility = RatingEligibility.NOT_EVALUATED
+        revision.status = RevisionStatus.PENDING
+        ensure_task(session, "review_moderation", review.id, priority=1)  # reopened reviews go first
     else:
         raise ReviewConflict("unsupported moderation decision")
 
@@ -752,7 +811,7 @@ def full_guest_recompute(session: Session, destination_id: uuid.UUID) -> tuple[i
         select(func.coalesce(func.sum(Review.counted_rating), 0), func.count(Review.id)).where(
             Review.destination_id == destination_id,
             Review.author_user_id.is_(None),
-            Review.status == ReviewStatus.PUBLISHED,
+            Review.status.in_((ReviewStatus.PUBLISHED, ReviewStatus.HIDDEN)),
             Review.counted_rating.is_not(None),
         )
     ).one()
@@ -773,7 +832,7 @@ def full_guest_category_recompute(
         .where(
             Review.destination_id == destination_id,
             Review.author_user_id.is_(None),
-            Review.status == ReviewStatus.PUBLISHED,
+            Review.status.in_((ReviewStatus.PUBLISHED, ReviewStatus.HIDDEN)),
             Review.counted_rating.is_not(None),
         )
         .group_by(ReviewCategoryRating.category)

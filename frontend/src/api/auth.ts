@@ -76,14 +76,7 @@ export async function logout(): Promise<void> {
   }
 }
 
-export type ReportReason = 'spam' | 'offensive' | 'false_information' | 'privacy' | 'conflict_of_interest' | 'other';
-
-/** A signed-in member reports a published review (API.md 4.4). `409 DUPLICATE_OPEN_REPORT` if one is already open. */
-export const reportReview = (reviewId: string, reasonCode: ReportReason, details?: string) =>
-  call<{ report_id: string; state: string }>(`/api/v1/reviews/${encodeURIComponent(reviewId)}/reports`, {
-    body: { reason_code: reasonCode, details: details || undefined },
-    session: true,
-  });
+// Reporting a review (member, anonymous, removal request) lives in `./reports`.
 
 export const requestPasswordReset =(email: string, turnstileToken?: string | null) =>
   call<{ status: string }>('/password-reset/request', { body: { email, turnstile_token: turnstileToken ?? undefined } });

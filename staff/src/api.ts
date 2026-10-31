@@ -7,6 +7,9 @@
  */
 
 import type {
+  AuditPage,
+  DecidedReview,
+  ReasonCatalogue,
   AuditItem,
   EnforcementCase,
   DecisionInput,
@@ -230,8 +233,72 @@ export const transitionReport = (reportId: string, input: ReportTransitionInput)
 
 // ---- audit, staff, monitoring ----
 
-export const getAuditEvents = (filters: { action?: string; target_type?: string; target_id?: string; before?: string }) =>
-  send<{ items: AuditItem[]; next_before: string | null }>('/api/v1/admin/audit-events', { query: { ...filters, limit: 50 } });
+export interface AuditFilters {
+  action?: string;
+  target_type?: string;
+  target_id?: string;
+  actor_role?: string;
+  request_id?: string;
+  /** Inclusive start and exclusive end, as ISO timestamps. */
+  from?: string;
+  to?: string;
+}
+
+export const getAuditEvents = (filters: AuditFilters, cursor?: string | null) =>
+  send<AuditPage>('/api/v1/admin/audit-events', { query: { ...filters, cursor, limit: 50 } });
+
+export const getAuditActions = () => send<{ actions: string[]; denied_prefix: string }>('/api/v1/admin/audit-events/actions', {});
+
+/** The CSV for the same filters (superadmin). Returned as text; the caller offers it as a download. */
+export async function exportAuditCsv(filters: AuditFilters): Promise<{ csv: string; rows: number; truncated: boolean }> {
+  const url = new URL(`${API_BASE}/api/v1/admin/audit-events/export`, globalThis.location?.origin ?? 'http://localhost');
+  for (const [key, value] of Object.entries(filters)) if (value) url.searchParams.set(key, String(value));
+  let response: Response;
+  try {
+    response = await fetch(url, { credentials: 'include', cache: 'no-store', headers: { Accept: 'text/csv' } });
+  } catch {
+    throw new StaffError(0, 'NETWORK_ERROR');
+  }
+  if (!response.ok) {
+    let code = `HTTP_${response.status}`;
+    try {
+      code = ((await response.json()) as { error?: { code?: string } }).error?.code ?? code;
+    } catch {
+      // not a JSON error body
+    }
+    throw new StaffError(response.status, code);
+  }
+  return { csv: await response.text(), rows: Number(response.headers.get('X-Row-Count') ?? 0), truncated: response.headers.get('X-Truncated') === 'true' };
+}
+
+export const getReasonCodes = () => send<{ groups: ReasonCatalogue }>('/api/v1/admin/reason-codes', {});
+
+// ---- hide pending a decision, Rejected and Hidden lists, reopen (R11) ----
+
+export const hidePending = (
+  reportId: string,
+  input: { expectedVersion: number; reasonCode: string; countsTowardRating: boolean; taskId: string; leaseToken: string },
+) =>
+  write<{ report_id: string; state: string; version: number; case_id: string; review_status: string; counted_rating: number | null }>(
+    `/api/v1/admin/reports/${reportId}/hide-pending`,
+    {
+      body: {
+        expected_version: input.expectedVersion,
+        reason_code: input.reasonCode,
+        counts_toward_rating: input.countsTowardRating,
+        task_id: input.taskId,
+        lease_token: input.leaseToken,
+      },
+    },
+  );
+
+export const getDecidedReviews = (status: 'REJECTED' | 'HIDDEN', after?: string | null) =>
+  send<{ items: DecidedReview[]; next_cursor: string | null }>('/api/v1/admin/reviews', { query: { status, after, limit: 50 } });
+
+export const reopenReview = (reviewId: string, input: { expectedVersion: number; reasonCode: string; note?: string }) =>
+  write<{ review_id: string; status: string; version: number }>(`/api/v1/admin/reviews/${reviewId}/reopen`, {
+    body: { expected_version: input.expectedVersion, reason_code: input.reasonCode, note: input.note || undefined },
+  });
 
 export const getAuditEvent = (id: string) => send<AuditItem>(`/api/v1/admin/audit-events/${id}`, {});
 export const getStaff = () => send<{ items: StaffMember[] }>('/api/v1/admin/staff', {});

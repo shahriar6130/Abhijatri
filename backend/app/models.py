@@ -124,6 +124,7 @@ class ModerationDecision(str, enum.Enum):
     REQUEST_CHANGES = "REQUEST_CHANGES"
     SET_CONFLICT = "SET_CONFLICT"
     CLEAR_CONFLICT = "CLEAR_CONFLICT"
+    REOPEN = "REOPEN"
 
 
 class SourceType(str, enum.Enum):
@@ -435,6 +436,11 @@ class Review(Base):
             postgresql_where=text("author_user_id IS NOT NULL"),
         ),
         Index(
+            "ix_reviews_purge_candidates",
+            "updated_at",
+            postgresql_where=text("status = 'REJECTED' AND purged_at IS NULL"),
+        ),
+        Index(
             "ix_reviews_published_feed",
             "destination_id",
             text("published_at DESC"),
@@ -480,6 +486,8 @@ class Review(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when retention redacted a rejected review's text (Moderation spec P-03); it can no longer be reopened.
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     current_revision: Mapped[ReviewRevision | None] = relationship(
         "ReviewRevision",
@@ -615,6 +623,19 @@ class ModerationActionRecord(Base):
     request_id: Mapped[str | None] = mapped_column(String(64))
 
 
+# Decision history is append-only like the audit log (Review.md 5.4): the database refuses UPDATE, DELETE and
+# TRUNCATE. Databases built from these models (tests) get the same guard migration 0020 installs.
+for _ddl in (
+    "CREATE OR REPLACE FUNCTION moderation_actions_are_append_only() RETURNS trigger SET search_path = '' AS $$ "
+    "BEGIN RAISE EXCEPTION 'moderation_actions is append-only'; END; $$ LANGUAGE plpgsql",
+    "CREATE TRIGGER moderation_actions_no_change BEFORE UPDATE OR DELETE ON moderation_actions "
+    "FOR EACH ROW EXECUTE FUNCTION moderation_actions_are_append_only()",
+    "CREATE TRIGGER moderation_actions_no_truncate BEFORE TRUNCATE ON moderation_actions "
+    "FOR EACH STATEMENT EXECUTE FUNCTION moderation_actions_are_append_only()",
+):
+    event.listen(ModerationActionRecord.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]
+
+
 class OutboxEvent(Base):
     """The shared outbox (Notification spec 7.1; Moderation spec 6.7). ``topic`` is the event type.
 
@@ -662,6 +683,8 @@ class AuditEvent(Base):
         Index("ix_audit_events_occurred_at", "occurred_at"),
         Index("ix_audit_events_target", "target_type", "target_id"),
         Index("ix_audit_events_actor", "actor_user_id"),
+        Index("ix_audit_events_action_time", "action", "occurred_at"),
+        Index("ix_audit_events_request", "request_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -759,11 +782,26 @@ class ModerationTask(Base):
 
 
 class Report(Base):
-    """A member's report on a review (Gantt R11). One open report per reporter and review."""
+    """A report on a published review (Gantt R11, Review.md 5.4).
+
+    Two sources: a signed-in member (``reporter_user_id``) or an anonymous visitor (``reporter_scope_hash``, a keyed
+    digest of the client address, never the address itself). ``contact`` is personal data, shown to staff only and
+    erased 30 days after the report is closed.
+    """
 
     __tablename__ = "reports"
     __table_args__ = (
         CheckConstraint("state IN ('open', 'in_review', 'actioned', 'dismissed')", name="ck_reports_state"),
+        CheckConstraint(
+            "reason_code IN ('spam', 'harassment', 'false_information', 'privacy', 'impersonation', "
+            "'safety_misinformation', 'copyright', 'conflict_of_interest', 'other', 'removal_request')",
+            name="ck_reports_reason",
+        ),
+        CheckConstraint(
+            "(source = 'member' AND reporter_user_id IS NOT NULL AND reporter_scope_hash IS NULL) OR "
+            "(source = 'anonymous' AND reporter_user_id IS NULL AND reporter_scope_hash IS NOT NULL)",
+            name="ck_reports_source",
+        ),
         Index(
             "uq_reports_one_open_per_reporter",
             "reporter_user_id",
@@ -771,12 +809,23 @@ class Report(Base):
             unique=True,
             postgresql_where=text("state IN ('open', 'in_review')"),
         ),
+        Index(
+            "uq_reports_one_open_per_scope",
+            "reporter_scope_hash",
+            "review_id",
+            unique=True,
+            postgresql_where=text("reporter_scope_hash IS NOT NULL AND state IN ('open', 'in_review')"),
+        ),
         Index("ix_reports_review", "review_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     review_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reviews.id", ondelete="CASCADE"), nullable=False)
-    reporter_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reporter_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(String(10), nullable=False, default="member", server_default="member")
+    reporter_scope_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32))
+    contact: Mapped[str | None] = mapped_column(String(200))
+    severity: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, server_default="1")
     reason_code: Mapped[str] = mapped_column(String(40), nullable=False)
     details: Mapped[str | None] = mapped_column(String(1000))
     state: Mapped[str] = mapped_column(String(12), nullable=False, default="open", server_default="open")

@@ -308,3 +308,17 @@ The Review specification is frozen after the schema amendments. Necessary implem
 | Invalid reviews | New `INELIGIBLE_INVALID` for a future visit month, no text or a rating out of range. | The existing values would have been misleading. Published text is unaffected. |
 | Abuse revocation | Moderator or superadmin, reason required, not on yourself; reviews stay public but stop counting. | Review.md 6.3; staying public avoids a second decision about the text. |
 | Repair | Detect-only nightly; repair only by explicit superadmin call or CLI flag, audited. | Review.md 6.3. |
+
+## 2026-11-01 (R11 reporting, moderation actions and audit)
+| Decision | Choice | Reason |
+|---|---|---|
+| Severe reports | A moderator chooses "Hide pending decision"; nothing hides a review automatically. | Review.md 5.4 says a severe report "may" hide a review. Automatic hiding lets a few accounts hide any review. |
+| Which reports suspend a rating | Only a member's `privacy`, `safety_misinformation` or `conflict_of_interest` report, while it is open. Anonymous reports never do. | Accountable reporters only; an anonymous visitor must not be able to lower a destination's score. |
+| Report reasons | The nine of Review.md 5.4 plus the anonymous-only `removal_request`; `offensive` is accepted and stored as `harassment`. | One list for validation, database check, priority, labels. |
+| Anonymous reports | Turnstile, Origin check, limits per network (5 an hour, 20 a day), duplicate control by a keyed digest of the network, always the same `202`. Contact is optional, staff-only, erased 30 days after the report closes. | No account, so the limits and the uniform answer do the work; the address is never stored. |
+| Takedown and the rating | `counts_toward_rating` now works: `true` keeps the counted rating while hidden. It defaults to `false`. | P-00 (owner, 31 Oct): hidden reviews leave the rating unless the moderator decides otherwise. |
+| Reopen | A rejected review can be reopened by a superadmin for 30 days after the rejection; after 30 days retention redacts title, body and media unless an appeal is open. | P-03. |
+| Reason codes | Strict groups for review decisions, report resolutions, hide and reopen; enforcement and verification notes stay free text. | P-06 without breaking the forms that take the moderator's own words. |
+| Role-denied staff requests | Audited as `denied.role`; a non-staff caller (404) is not recorded. | Moderation spec 9; strangers must not be able to fill the log. |
+| Database data errors | A database data exception answers `422`, not `503`. | A NUL character is the caller's mistake, not an outage. |
+| Sanction expiry | A sanction is in force only until its end time; a request that meets an expired one ends it. The daily job is a sweeper, not the mechanism. | P-01. |

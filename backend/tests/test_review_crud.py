@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import test_admin as admin
 import test_auth as support
+from conftest import backdate_decisions
 from fastapi.testclient import TestClient
 from receipts import new_receipt
 from sqlalchemy import select, update
@@ -236,7 +237,7 @@ def test_request_changes_sends_a_review_back_and_the_author_resubmits(client: Te
     destination = _destination(postgres_session)
     receipt = new_receipt()
     review = _guest_review(postgres_session, destination, receipt)
-    result = _moderate(client, postgres_session, fake, review.id, "REQUEST_CHANGES", "mod@example.com", "203.0.113.20", reason="remove-phone-number")
+    result = _moderate(client, postgres_session, fake, review.id, "REQUEST_CHANGES", "mod@example.com", "203.0.113.20", reason="remove-personal-info")
     assert result.status_code == 200, result.text
     assert result.json()["status"] == "CHANGES_REQUESTED"
     postgres_session.expire_all()
@@ -248,7 +249,7 @@ def test_request_changes_sends_a_review_back_and_the_author_resubmits(client: Te
 
     guest = _anonymous(client)
     status = guest.post(f"{API}/review-receipts/status", json={"review_id": str(review.id), "receipt_secret": receipt}).json()
-    assert status["status"] == "CHANGES_REQUESTED" and status["decision_reason"] == "remove-phone-number" and status["appeal_deadline"] is None
+    assert status["status"] == "CHANGES_REQUESTED" and status["decision_reason"] == "remove-personal-info" and status["appeal_deadline"] is None
 
     resubmitted = _edit(guest, str(review.id), status["version"], receipt_secret=receipt, body="The note without the phone number, long enough.")
     assert resubmitted.status_code == 200 and resubmitted.json()["status"] == "PENDING"
@@ -425,7 +426,7 @@ def test_a_late_guest_appeal_is_refused(client: TestClient, postgres_session: Se
     receipt = new_receipt()
     review = _guest_review(postgres_session, destination, receipt)
     assert _moderate(client, postgres_session, fake, review.id, "REJECT", "decider@example.com", "203.0.113.70", reason="spam").status_code == 200
-    postgres_session.execute(update(ModerationActionRecord).where(ModerationActionRecord.review_id == review.id).values(created_at=datetime.now(UTC) - timedelta(days=32)))
+    backdate_decisions(postgres_session, datetime.now(UTC) - timedelta(days=32), review_id=review.id)
     postgres_session.commit()
     guest = _anonymous(client)
     late = guest.post(f"{API}/review-receipts/appeals", json={"review_id": str(review.id), "receipt_secret": receipt, "statement": "Please reconsider this decision."})

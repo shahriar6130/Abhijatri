@@ -1,5 +1,6 @@
 import os
 from collections.abc import Generator
+from datetime import datetime
 from urllib.parse import urlparse
 
 import pytest
@@ -18,7 +19,11 @@ if os.getenv("TEST_DATABASE_URL"):
 get_settings.cache_clear()
 
 from app import models  # noqa: E402, F401
+from app.admin import audit as _audit  # noqa: E402
 from app.db import Base  # noqa: E402
+
+# An audit action that is not listed in app.audit_actions fails the test that wrote it (Moderation spec 6.6).
+_audit.STRICT = True
 
 
 def _test_database_url() -> str:
@@ -29,6 +34,18 @@ def _test_database_url() -> str:
     if not database_name.endswith("_test"):
         pytest.fail("Refusing to reset a database whose name does not end with '_test'")
     return value
+
+
+def backdate_decisions(session: Session, when: "datetime", **where: object) -> None:
+    """Move decisions into the past for a test. The table is append-only, so the guard is lifted for this one
+    statement only (never in application code); the next statement is guarded again."""
+    from sqlalchemy import update as _update
+
+    session.execute(text("ALTER TABLE moderation_actions DISABLE TRIGGER moderation_actions_no_change"))
+    try:
+        session.execute(_update(models.ModerationActionRecord).where(*[getattr(models.ModerationActionRecord, k) == v for k, v in where.items()]).values(created_at=when))
+    finally:
+        session.execute(text("ALTER TABLE moderation_actions ENABLE TRIGGER moderation_actions_no_change"))
 
 
 @pytest.fixture()
@@ -43,5 +60,6 @@ def postgres_session() -> Generator[Session, None, None]:
     Base.metadata.drop_all(engine)
     with engine.begin() as connection:  # drop_all leaves functions behind; the migration check needs a clean database
         connection.execute(text("DROP FUNCTION IF EXISTS audit_events_are_append_only()"))
+        connection.execute(text("DROP FUNCTION IF EXISTS moderation_actions_are_append_only()"))
     engine.dispose()
 

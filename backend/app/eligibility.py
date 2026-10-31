@@ -35,11 +35,12 @@ from app.models import (
     Verification,
 )
 from app.models import utcnow as _utcnow
+from app.report_reasons import RATING_SUSPENDING
 
 # Report reasons that take a review out of the rating while the report is open (Review.md 5.4, 6.1:
 # "a serious unresolved report"). Spam, offensive wording, false information and "other" are handled
 # by moderators through the normal queue and do not suspend a rating (Decisions.md).
-SERIOUS_REPORT_REASONS = frozenset({"privacy", "conflict_of_interest"})
+SERIOUS_REPORT_REASONS = RATING_SUSPENDING
 OPEN_REPORT_STATES = ("open", "in_review")
 
 
@@ -107,15 +108,25 @@ def has_serious_open_report(session: Session, review_id: uuid.UUID) -> bool:
                 Report.review_id == review_id,
                 Report.state.in_(OPEN_REPORT_STATES),
                 Report.reason_code.in_(SERIOUS_REPORT_REASONS),
+                # Only an accountable member's report suspends a rating; an anonymous one is triaged but cannot
+                # be used to knock a destination's score down (Decisions.md, R11).
+                Report.source == "member",
             )
         )
         is not None
     )
 
 
-def evaluate_eligibility(session: Session, review: Review, *, today: date | None = None) -> RatingEligibility:
-    """The rating state a review would have if it were counted now (Review.md 6.1)."""
-    if review.status != ReviewStatus.PUBLISHED:
+def evaluate_eligibility(
+    session: Session, review: Review, *, today: date | None = None, assume_published: bool = False
+) -> RatingEligibility:
+    """The rating state a review would have if it were counted now (Review.md 6.1).
+
+    ``assume_published`` asks the question for a hidden review whose rating a takedown keeps (Moderation spec P-00):
+    the status rule does not apply, and neither does the open-report rule, because hiding the review is the
+    moderator's handling of that very report and keeping its rating is their explicit decision.
+    """
+    if review.status != ReviewStatus.PUBLISHED and not assume_published:
         return (
             RatingEligibility.INELIGIBLE_REPORTED
             if review.status == ReviewStatus.HIDDEN
@@ -134,6 +145,6 @@ def evaluate_eligibility(session: Session, review: Review, *, today: date | None
         return RatingEligibility.INELIGIBLE_INVALID
     if _is_duplicate(session, review):
         return RatingEligibility.INELIGIBLE_DUPLICATE
-    if has_serious_open_report(session, review.id):
+    if not assume_published and has_serious_open_report(session, review.id):
         return RatingEligibility.INELIGIBLE_REPORTED
     return RatingEligibility.ELIGIBLE

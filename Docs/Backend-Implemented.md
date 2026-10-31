@@ -947,3 +947,32 @@ Eligibility is frozen at publication: ordinary verification expiry never uncount
 **Evidence (31 October 2026).** `tests/test_rating_exclusion.py` (33 tests: formula table, every rule, public feed and totals after hide, reject, withdraw, delete, report and restore, a random-transition property test that reconciles after every step) and `tests/test_rating_integrity.py` (revocation, race with a publish, atomic failure, drift detection, repair, nightly job, evidence, access rules, CSRF, TOTP, ops route). Removing the duplicate or serious-report rule makes three of them fail. Full suite: 287 unit and 272 integration tests, migration round trip and `alembic check` clean. Online project: totals of all five destinations equal a full recomputation and no review row contradicts itself (read-only check). **Migration 0019 is not yet applied online**: it is applied by the container on the next deploy (`alembic upgrade head` at start).
 
 **Not built.** A ranked Top Rated list (discovery, H02); a staff button for revocation (the API is ready); a delete workflow (the `DELETED` state is excluded by the rules and tested).
+
+### 5.22 R11: review reporting, moderation actions and the audit log (1 November 2026)
+
+Inspection found the R10/R11 core already built (35 staff routes, queue, leases, decisions, appeals, audit). R11 therefore closed twelve gaps against `Features/Review.md` 5.4 and the Moderation spec, two of them real defects:
+
+| # | Gap or defect | Fix | Where |
+|---|---|---|---|
+| F1 | 6 report reasons, spec has 9 | Nine reasons plus `removal_request`; `offensive` stored as `harassment`; one list for API, database check, priority, rating rule and labels | `app/report_reasons.py`, migration `0020` |
+| F2 | No anonymous report or lost-receipt removal request | `POST /public/review-reports`, `POST /public/removal-requests`: Origin, Turnstile, durable limits, uniform `202`, keyed digest of the network, contact erased after 30 days | `app/public_reports.py`, `admin/actions.py` |
+| F3 | No quick action on a severe report | `POST /admin/reports/{id}/hide-pending`: a moderator hides a reported review as a takedown case; never automatic | `actions.hide_pending_decision` |
+| F4 | `counts_toward_rating` stored but never read | A takedown can keep the counted rating; changing the flag moves the totals under the usual locks; R08 reconciliation counts "published, or hidden while kept" | `services.set_hidden_rating_kept`, `moderate_review(keep_rating)` |
+| F5 | **A posting restriction did not stop review writes** (only verification) | `ensure_not_restricted` on member review create, edit, media and report | `member_routes.py`, `api.py` |
+| F6 | **An expired sanction kept blocking until the unscheduled job ran** | A sanction is in force only until its end time; a request that meets an expired one ends it and audits `sanction.expired`; daily workflow added | `cases.expire_due_sanctions`, `auth/sessions.py`, `retention.yml` |
+| F7 | Report creation wrote no audit row and had no limit | Audit `report.create`; 20 an hour and 5 per review a day per member | `actions.create_report` |
+| F8 | `moderation_actions` could be changed | `UPDATE`, `DELETE`, `TRUNCATE` refused by trigger, like `audit_events` | migration `0020`, `models.py` |
+| F9 | Audit paging skipped rows with equal timestamps; no range, request id, catalogue or export | Keyset cursor on time and id; filters; `GET /admin/audit-events/actions`; capped, neutralised, audited CSV export | `admin/audit.py` |
+| F10 | No Rejected or Hidden lists, no reopen, rejected text kept forever | Lists with `recoverable_until`; superadmin reopen within 30 days; retention redacts text and media after 30 days unless appealed | `review_lists.py`, `retention.py` |
+| F11 | Free-text reason codes | Server catalogue; strict groups refuse other codes | `app/reasons.py` |
+| F12 | Retention had no schedule | `POST /ops/jobs/retention` and `.github/workflows/retention.yml` | `ops/routes.py` |
+
+**Found while testing.** (a) A staff member refused for their **role** was never audited (the 403 comes from the dependency before the route), against Moderation spec 9; it is now `denied.role` with the route, and repeated denials raise the security alert. (b) A NUL character in a text field made PostgreSQL refuse the value and the API answered `503`; a database data exception now answers `422 VALIDATION_FAILED`. (c) A rating already suspended by an open serious report could not be kept by a takedown; the moderator's explicit choice now wins. (d) R08 tests that built "next month" from the machine's UTC date failed for six hours a day, because the app counts months in Dhaka time; they now use the Dhaka date.
+
+**Rules.** Serious reasons from a member (`privacy`, `safety_misinformation`, `conflict_of_interest`) take the rating out while the report is open; anonymous reports never do. A report never hides a review. `POST /admin/enforcement-cases` now defaults `counts_toward_rating` to `false`. `AUDIT_ACTIONS` (`app/audit_actions.py`) lists every audit action; the test suite fails if code writes one that is not listed, and a test fails if a new state-changing route has no stated audit trail.
+
+**Evidence (1 November 2026).** New tests: `test_reports.py` (59), `test_moderation_actions.py` (45), `test_audit_log.py` (31), `test_restrictions.py` (28), plus updates to the R08, admin, ops and media suites. Mutation checks: removing the restriction check, the member rate limit, the anonymous-source rule or the `moderation_actions` trigger makes tests fail. Backend: 289 unit and 438 integration tests, `alembic upgrade`, `check`, `downgrade` clean. Front end: 109 public and 45 staff tests.
+
+**Deployment.** Migration `0020_reports_mod_audit` adds `reports.source`, `reporter_scope_hash`, `contact`, `severity` (and makes `reporter_user_id` nullable), `reviews.purged_at`, enum value `REOPEN`, indexes and the `moderation_actions` trigger. The container applies it with `alembic upgrade head` before it starts. **Do not start this code against the online database before that migration has run**: every review query reads `reviews.purged_at`. The workflows `retention.yml` and `rating-reconciliation.yml` need the `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` repository secrets.
+
+**Not built.** P-02 (moderators must be Verified Members), P-04 (moderators see each other), P-05 (reopen a rejected verification); a hash chain over the audit log; automatic hiding (declined on purpose, abuse risk).

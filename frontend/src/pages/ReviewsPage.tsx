@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, LoadingState } from '../components/common/Statu
 import { GuestReviewForm, type SubmittedReview } from '../components/reviews/GuestReviewForm';
 import { ReceiptPanel } from '../components/reviews/ReceiptPanel';
 import { ReceiptStatusPanel } from '../components/reviews/ReceiptStatusPanel';
+import { RemovalRequestForm } from '../components/reviews/RemovalRequestForm';
 
 export const ReviewsPage: React.FC = () => {
   const { t } = useLanguage();
@@ -50,6 +51,7 @@ export const ReviewsPage: React.FC = () => {
       )}
 
       <ReceiptStatusPanel />
+      <RemovalRequestForm />
     </div>
   );
 };

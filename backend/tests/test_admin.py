@@ -17,6 +17,7 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import reasons
 from app.admin import roles, tasks
 from app.auth.sessions import Principal
 from app.auth.tokens import Claims
@@ -119,9 +120,11 @@ def _decision(task: ModerationTask, lease: str, review: Review, **overrides: Any
         "lease_token": lease,
         "expected_version": review.version,
         "decision": "PUBLISH",
-        "reason_code": "meets-policy",
     }
     body.update(overrides)
+    # Reasons come from the server's catalogue (P-06); the first code of the decision's group is a valid default.
+    group = reasons.DECISION_GROUP.get(str(body["decision"]))
+    body.setdefault("reason_code", reasons.GROUPS[group][1][0].code if group else "unknown-decision")
     return body
 
 
@@ -502,9 +505,9 @@ def test_report_to_decision_flow(client: TestClient, postgres_session: Session, 
     lease = _claim(mod, task)
     start = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "in_review", "expected_version": 1, "reason_code": "looking", "task_id": str(task.id), "lease_token": lease["lease_token"]})
     assert start.status_code == 200 and start.json() == {"report_id": str(report_id), "state": "in_review", "version": 2}
-    back = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "in_review", "expected_version": 2, "reason_code": "again", "task_id": str(task.id), "lease_token": lease["lease_token"]})
+    back = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "in_review", "expected_version": 2, "reason_code": "looking", "task_id": str(task.id), "lease_token": lease["lease_token"]})
     assert back.status_code == 422 and back.json()["error"]["code"] == "TRANSITION_NOT_ALLOWED"
-    stale = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "actioned", "expected_version": 1, "reason_code": "stale", "task_id": str(task.id), "lease_token": lease["lease_token"]})
+    stale = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "actioned", "expected_version": 1, "reason_code": "report-confirmed", "task_id": str(task.id), "lease_token": lease["lease_token"]})
     assert stale.status_code == 409
     # the reviewer hides the reported review under the report task's own lease; the task stays open
     review = postgres_session.get(Review, review.id)
@@ -519,7 +522,7 @@ def test_report_to_decision_flow(client: TestClient, postgres_session: Session, 
     unrelated = mod.post(f"{BASE}/submissions/{another.id}/moderation-actions", json=_decision(task, lease["lease_token"], another))
     assert unrelated.status_code == 404, "a report task can only decide the review it names"
 
-    done = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "actioned", "expected_version": 2, "reason_code": "spam-confirmed", "note": "hidden", "task_id": str(task.id), "lease_token": lease["lease_token"]})
+    done = mod.post(f"{BASE}/reports/{report_id}/transition", json={"to": "actioned", "expected_version": 2, "reason_code": "report-confirmed", "note": "hidden", "task_id": str(task.id), "lease_token": lease["lease_token"]})
     assert done.status_code == 200 and done.json()["state"] == "actioned"
     postgres_session.expire_all()
     report = postgres_session.get(Report, report_id)

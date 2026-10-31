@@ -132,6 +132,7 @@ def request_verification(body: VerificationBody, principal: Writer, session: DbS
 @limiter.limit("20/hour")
 def create_member_review(request: Request, response: Response, payload: MemberReviewCreate, principal: Writer, session: DbSession) -> GuestReviewCreated:
     """A signed-in member's review. No Turnstile: the session, CSRF token and rate limit stand in for it."""
+    cases.ensure_not_restricted(session, principal.user.id)  # a restricted or suspended member cannot post (spec 6.4)
     try:
         result = submit_member_review(session, payload, principal.user.id)
         session.commit()
@@ -155,6 +156,7 @@ def _storage_down(error: StorageUnavailable) -> ApiError:
 @limiter.limit("30/hour")
 def media_intent(request: Request, review_id: uuid.UUID, body: MediaIntentRequest, principal: Writer, session: DbSession, storage: Storage) -> MediaIntent:
     """Step 1 of an upload: returns a one-time signed URL for exactly one file (Review.md 8)."""
+    cases.ensure_not_restricted(session, principal.user.id)
     try:
         intent = _commit(session, lambda: media.create_intent(
             session, storage, principal, review_id,
@@ -168,6 +170,7 @@ def media_intent(request: Request, review_id: uuid.UUID, body: MediaIntentReques
 @router.post("/reviews/{review_id}/media/{media_id}/complete", response_model=MediaStatus)
 def media_complete(review_id: uuid.UUID, media_id: uuid.UUID, principal: Writer, session: DbSession, storage: Storage) -> MediaStatus:
     """Step 2: the server checks the uploaded file and keeps a cleaned copy for the moderator."""
+    cases.ensure_not_restricted(session, principal.user.id)
     try:
         item = media.complete_upload(session, storage, principal, review_id, media_id)
         session.commit()

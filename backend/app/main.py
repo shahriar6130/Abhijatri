@@ -24,6 +24,7 @@ from app.notify.webhooks import router as webhook_router
 from app.notify.worker import NotificationWorker
 from app.ops import events
 from app.ops.routes import router as ops_router
+from app.public_reports import router as public_reports_router
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
     application.include_router(auth_router)
     application.include_router(admin_router)
     application.include_router(reports_router)
+    application.include_router(public_reports_router)
     application.include_router(notification_admin_router)
     application.include_router(webhook_router)
     application.include_router(member_router)

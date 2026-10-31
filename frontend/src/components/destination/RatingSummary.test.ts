@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMMUNITY_RATING_THRESHOLD, bayesianScore } from './RatingSummary';
+import { COMMUNITY_RATING_THRESHOLD, bayesianScore, seededProgress } from './RatingSummary';
 
 /** The API computes the score; this local formula is only a fallback. These are the values the backend
  *  tests assert for the same inputs (`test_rating_exclusion.py`, Review.md 6.1), so the two cannot drift. */
@@ -24,5 +24,14 @@ describe('bayesianScore (fallback for the server score)', () => {
     expect(low).toBeGreaterThan(1);
     expect(high).toBeLessThan(5);
     expect(high).toBeGreaterThan(low);
+  });
+});
+
+describe('seeded progress (Review.md 6.1: the count is always shown)', () => {
+  it('says how many verified reviews exist toward the five needed', () => {
+    expect(seededProgress(0)).toBe('0 of 5 verified reviews');
+    expect(seededProgress(1)).toBe('1 of 5 verified reviews');
+    expect(seededProgress(4)).toBe('4 of 5 verified reviews');
+    expect(seededProgress(9)).toBe('5 of 5 verified reviews');
   });
 });

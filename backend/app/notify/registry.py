@@ -68,6 +68,7 @@ TEMPLATES: dict[str, Template] = {
     "content.hidden": Template("আপনার রিভিউ লুকানো হয়েছে", "Your review was hidden", f"রিভিউটি এখন জনসমক্ষে দেখা যাচ্ছে না। {APPEAL_HINT[0]}", f"The review is no longer public. {APPEAL_HINT[1]}"),
     "content.taken_down": Template("আপনার রিভিউ সরিয়ে নেওয়া হয়েছে", "Your review was taken down", f"নীতিমালা অনুযায়ী রিভিউটি সরানো হয়েছে। {APPEAL_HINT[0]}", f"The review was taken down under the policy. {APPEAL_HINT[1]}"),
     "content.removed": Template("আপনার রিভিউ স্থায়ীভাবে সরানো হয়েছে", "Your review was removed", f"পর্যালোচনার পর রিভিউটি সরানোর সিদ্ধান্ত বহাল। {APPEAL_HINT[0]}", f"After review, the removal stands. {APPEAL_HINT[1]}"),
+    "content.reopened": Template("আপনার রিভিউ আবার পর্যালোচনায়", "Your review is being reviewed again", "একজন সুপারঅ্যাডমিন আপনার বাতিল হওয়া রিভিউটি আবার মডারেশনে পাঠিয়েছেন। এখনো এটি প্রকাশিত হয়নি।", "A superadmin sent your rejected review back to moderation. It is not published yet."),
     "content.restored": Template("আপনার রিভিউ আবার দেখা যাচ্ছে", "Your review is visible again", "মডারেটর আপনার রিভিউ ফিরিয়ে দিয়েছেন।", "A moderator restored your review."),
     # ---- members: account ----
     "account.case_opened": Template("আপনার অ্যাকাউন্টে পর্যালোচনা", "Your account is under review", f"নীতিমালা অনুযায়ী আপনার অ্যাকাউন্ট পর্যালোচনা হচ্ছে। {APPEAL_HINT[0]}", f"Your account is being reviewed under the policy. {APPEAL_HINT[1]}"),
@@ -119,6 +120,7 @@ RULES: tuple[Rule, ...] = (
     Rule("review.state_changed", "content.changes_requested", "payload_user", "author_id", "high", route="/account", when=_when(decision="REQUEST_CHANGES")),
     Rule("review.state_changed", "content.rejected", "payload_user", "author_id", "critical", route="/account/appeals", when=_when(decision="REJECT")),
     Rule("review.state_changed", "content.hidden", "payload_user", "author_id", "critical", route="/account/appeals", when=_when(decision="HIDE")),
+    Rule("review.state_changed", "content.reopened", "payload_user", "author_id", "normal", route="/account", when=_when(decision="REOPEN")),
     Rule("review.state_changed", "content.restored", "payload_user", "author_id", "normal", route="/destinations/{destination_id}", when=_when(decision="RESTORE")),
     # enforcement
     Rule("enforcement.opened", "content.taken_down", "payload_user", "subject_id", "critical", route="/account/appeals", when=_when(kind="takedown")),

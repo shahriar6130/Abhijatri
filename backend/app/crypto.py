@@ -24,6 +24,9 @@ _RECEIPT_BODY = re.compile(r"[A-Za-z0-9_-]{43}")
 _MIN_DISTINCT_BYTES = 9  # 32 random bytes essentially never have fewer than this many distinct values
 
 
+REPORT_SCOPE_LABEL = "abhijatri:report-scope:v1"
+
+
 def current_key_id() -> str:
     return get_settings().receipt_key_current
 
