@@ -1,869 +1,466 @@
 # Abhijatri Moderation Dashboard: Architecture and API Specification
 
-**Scope:** Admin authentication and authorization, moderation queues,
-verification, enforcement, appeals, audit, retention, and notification
-integration.
-
-
-## 1. Purpose and Scope
-
-The Abhijatri moderation dashboard provides authorized staff with tools
-to review verification cases, moderate user submissions, handle reports,
-apply enforcement actions, and process appeals.
-
-The system must provide:
-
--   Server-enforced authentication and role-based authorization.
--   A hybrid work queue: assigned work plus eligible unassigned work
-    that staff can claim.
--   Explicit state transitions and concurrency-safe decisions.
--   Private handling of verification evidence.
--   An append-only audit trail for privileged actions and decisions.
--   Controlled retention and deletion of evidence and moderation
-    records.
--   Transactional integration with notifications through a shared outbox
-    contract.
--   Monitoring sufficient to detect authorization failures, queue
-    stalls, and notification failures.
-
-This specification describes the architecture and API behavior. It does
-not authorize production migration until the existing schema, policies,
-routes, and deployed behavior have been inspected.
-
-## 2. Roles and Authorization Model
-
-### 2.1 Authentication
-
-Members, moderators, and superadmins use the same authentication system.
-Authentication establishes the identity of the user; the backend
-determines the user's current permissions from authoritative application
-data.
-
-The frontend may hide routes and controls based on the user's role, but
-frontend checks are only a user-experience convenience. Every privileged
-API request must be authorized on the server.
-
-### 2.2 Role invariant
-
-**V1 policy: one active staff role per user.** A user may be a normal
-member without a staff role, or hold exactly one active staff role:
-`moderator` or `superadmin`. A user must not simultaneously hold both
-active staff roles.
-
-Enforce this invariant in the database, not only in application code. If
-the product later needs multiple simultaneous roles, revise this policy
-and its constraints explicitly before implementing that change.
-
-Recommended role table:
-
--   `user_roles`
-    -   `user_id`
-    -   `role` (`moderator` or `superadmin`)
-    -   `granted_by`
-    -   `granted_at`
-    -   `revoked_by` (nullable)
-    -   `revoked_at` (nullable)
-    -   `created_at`
-
-Use a partial unique index on `user_id` for rows where
-`revoked_at IS NULL`, so only one active staff-role row can exist per
-user. Add database checks for valid role values. Keep role grants and
-revocations auditable.
-
-### 2.3 Permission boundaries
-
--   **Member:** can access only member-facing resources allowed by the
-    product.
--   **Moderator:** can process ordinary verification and
-    content-moderation work assigned to them or legitimately claimed by
-    them.
--   **Superadmin:** can handle escalated cases, manage staff roles, and
-    perform explicitly designated high-impact operations.
--   **Appeal reviewer:** must be independent of the original
-    decision-maker where staffing permits; the original decision-maker
-    must not decide their own appeal.
-
-A superadmin is not automatically permitted to bypass audit, retention,
-or transaction rules.
-
-### 2.4 Denial behavior
-
-Unauthorized staff routes and APIs must not reveal protected case data.
-The application may return `404` for staff-only resources to avoid
-disclosing their existence; otherwise use consistent `401`/`403`
-behavior. Choose and document a consistent API convention. Do not rely
-on obscurity as the security boundary.
-
-------------------------------------------------------------------------
-
-## 3. System Architecture
-
-### 3.1 System of record
-
-Use Supabase Postgres as the authoritative store for moderation state,
-role assignments, task leases, audit events, and outbox events. Use
-Supabase Auth for identity, Supabase Storage for private evidence, and
-Supabase Realtime only where useful for best-effort UI updates.
-
-Redis and an external queue are optional future optimizations. They are
-not required for v1 and must not become the authoritative source of task
-state or notification delivery state.
-
-### 3.2 Frontend
-
-Admin UI routes live under `/admin`. The UI should show only actions
-available to the current staff member, but the server must independently
-validate every action.
-
-Do not put service-role credentials or privileged database credentials
-in the browser. Use server-side API routes or trusted backend functions
-for privileged operations.
-
-### 3.3 Storage and evidence
-
-Verification evidence must be stored in a private bucket. Access is
-granted through server-authorized requests or short-lived signed URLs.
-The backend must verify that the requesting user is authorized for the
-specific case before issuing a URL.
-
-Define who may upload, replace, view, and delete each evidence item.
-Record material evidence changes in the audit trail. Signed URLs should
-have short expiry periods appropriate to the use case; do not treat
-possession of an old URL as ongoing authorization.
-
-### 3.4 Realtime
-
-Realtime updates are a convenience, not a source of truth. After
-receiving an update or reconnecting, the client must refresh
-authoritative state. A missed event must not cause a decision to be
-accepted against stale data.
-
-------------------------------------------------------------------------
-
-## 4. Session and Security Policy
-
-### 4.1 Session lifetime
-
-Use Supabase Auth session and refresh-token behavior as the identity
-layer. Application policy additionally requires:
-
--   Moderator session target: up to 30 days, subject to the configured
-    authentication provider policy and risk controls.
--   Superadmin: inactivity timeout of 8 hours.
--   Recent reauthentication for high-impact actions, including
-    staff-role changes and other actions designated by the security
-    policy.
--   MFA for superadmins; require MFA for moderators if supported by the
-    deployment's risk policy.
-
-These are application targets and must be verified against the actual
-Supabase project configuration; do not assume that naming a duration in
-this document configures the provider.
-
-### 4.2 Current authorization and revocation
-
-A role/account-state cache may be used for low-risk reads only if it has
-a maximum TTL of 60 seconds and a reliable invalidation mechanism. That
-cache does **not** guarantee immediate revocation.
-
-For sensitive actions---including role changes, enforcement, appeal
-decisions, and access to restricted evidence---read current role and
-account state from the authoritative database within the controlled
-operation. If the system cannot establish authorization reliably, fail
-closed.
-
-When a role is revoked or an account is disabled, invalidate relevant
-caches and revoke or invalidate sessions where the authentication system
-supports it. All privileged endpoints must still enforce current
-authorization even if a session remains technically valid.
-
-### 4.3 Database security
-
--   Enable and review RLS for tables exposed through Supabase client
-    APIs.
--   Use explicit database grants; RLS alone is not a substitute for
-    least-privilege grants.
--   Do not permit clients to insert or modify audit events, staff-role
-    assignments, moderation decisions, or notification outbox rows
-    directly.
--   Keep service-role credentials server-side only.
--   Test authorization using member, moderator, superadmin,
-    revoked-role, disabled-account, and unauthenticated identities.
-
-------------------------------------------------------------------------
-
-## 5. Work Queue and Task Claims
-
-### 5.1 Queue model
-
-Use a hybrid queue:
-
-1.  Tasks assigned to a staff member.
-2.  Eligible unassigned tasks that a qualified staff member may claim.
-
-The database is authoritative for task ownership and lease status. The
-UI may display a task as available, but availability must be revalidated
-atomically when the task is claimed.
-
-### 5.2 Claim leases
-
-A claim should include, at minimum:
-
--   `claimed_by`
--   `claimed_at`
--   `lease_expires_at`
--   `lease_token` or equivalent claim version
--   `updated_at`
-
-Claim, heartbeat/renewal, release, and decision operations must verify
-the current state, actor eligibility, and lease ownership in a single
-controlled database operation or transaction.
-
-A claim must not be accepted merely because the task appeared claimable
-in a prior query. Concurrent claims must result in at most one valid
-lease. Expired leases may be reclaimed under a documented rule.
-
-### 5.3 Eligibility and escalation
-
-The server must verify task eligibility for the actor at claim time and
-decision time. If a task becomes escalated while a moderator has it
-open, the moderator must not be able to approve it using stale UI state.
-The decision operation must re-read current task/case state and enforce
-the current role requirement.
-
-### 5.4 Failure and recovery
-
-Lease expiry must not silently change the underlying moderation decision
-state. A worker or staff member may lose a lease while viewing a case;
-subsequent writes must fail with a conflict response and instruct the
-client to reload.
-
-------------------------------------------------------------------------
-
-## 6. Core Data Model
-
-The following describes the logical schema. Inspect the existing
-database and migrations before creating, renaming, or altering tables.
-Reuse compatible existing structures where possible; do not blindly run
-a fresh-schema migration against production.
-
-### 6.1 `user_roles`
-
-Suggested fields:
-
--   `user_id`
--   `role`
--   `granted_by`
--   `granted_at`
--   `revoked_by`
--   `revoked_at`
--   `created_at`
-
-Constraints:
-
--   Role value is restricted to the approved role set.
--   At most one active staff role per user.
--   Role grant/revoke operations require superadmin authorization and
-    recent reauthentication.
--   Prevent revocation of the final active superadmin.
-
-**Concurrency rule:** granting or revoking a superadmin role must be
-serialized. Lock the relevant role-management guard row or use an
-equivalent transaction-level advisory lock, re-check the
-active-superadmin count inside the transaction, and then apply the
-change. A pre-transaction count is insufficient because two concurrent
-requests could otherwise remove the last superadmins. Audit the result
-in the same transaction.
-
-### 6.2 Verification cases
-
-A verification case should retain the applicant, current state, case
-version, assigned reviewer/claim lease, evidence references, timestamps,
-and decision metadata.
-
-Use optimistic concurrency with a `version` field or a row lock. A
-decision must update the case only if the expected version and allowed
-prior state still match. If the update affects zero rows, return a
-conflict and require the client to reload.
-
-Define permitted transitions explicitly, for example:
-
--   `submitted` → `in_review`
--   `in_review` → `needs_clarification`
--   `needs_clarification` → `in_review`
--   `in_review` → `approved`
--   `in_review` → `rejected`
--   Any eligible review state → `escalated` (only under defined rules)
--   `escalated` → an allowed final decision state by a superadmin
-
-Do not allow arbitrary state changes from a generic update endpoint.
-Each transition must validate actor permissions, required fields,
-evidence requirements, current version, and claim ownership where
-applicable.
-
-Rejected verification records may be retained for 30 days under the
-proposed default, subject to the retention rules in Section 10. A
-`purge_after` timestamp may drive cleanup, but it must not override an
-open appeal, legal hold, or another documented preservation rule.
-
-### 6.3 Content submissions, moderation tasks, actions, and reports
-
-Keep the user-submitted content record separate from the moderation task
-and from the action history.
-
-Suggested logical entities:
-
--   `submissions`: original content and its lifecycle state.
--   `moderation_tasks`: queue state, assignee/claim lease, priority, and
-    task version.
--   `moderation_actions`: immutable decision/action history.
--   `reports`: user reports and their review state.
-
-Store moderation decisions as append-only actions and update the current
-submission/task state in the same transaction. Do not overwrite the only
-record of a prior decision.
-
-### 6.4 Enforcement, removal, and sanctions
-
-Represent enforcement cases and sanctions separately from the underlying
-submission. Define the difference between:
-
--   **Hidden/taken down:** content is not publicly visible while review
-    or enforcement is pending.
--   **Removed:** content has been removed from public availability under
-    the applicable policy.
--   **Restored:** visibility is restored after review or appeal.
--   **Sanctioned:** an account-level restriction with a defined type,
-    scope, start, and end/review date.
-
-A takedown must not automatically imply permanent exclusion from ratings
-or metrics. Keep public visibility and rating/aggregation eligibility as
-separate fields, including `counts_toward_rating`, with explicit
-policy-controlled transitions. Record the reason and actor for each
-change.
-
-Emergency takedown must have a defined path, authorization rule, audit
-event, and follow-up review deadline. Do not leave emergency states
-without an owner or review path.
-
-### 6.5 Appeals
-
-An appeal record should include the appellant, target type and ID,
-original decision reference, reason, state, submitted time, deadline,
-reviewer, and decision metadata.
-
-Because a polymorphic `target_type`/`target_id` pair cannot normally
-have a direct foreign key to multiple target tables, the backend must
-validate target existence and eligibility, appellant ownership/standing,
-appeal deadline, and duplicate-appeal policy in the same transaction
-that creates the appeal. Use typed foreign keys or separate
-target-specific tables if stronger database-level referential integrity
-is practical.
-
-Define explicitly:
-
--   Which decision types are appealable.
--   Who may appeal each decision.
--   How deadlines are calculated using server time and the policy's
-    specified timezone.
--   Whether withdrawn or decided appeals can be reopened and under what
-    conditions.
--   Whether a new appeal is allowed after a prior appeal has been
-    decided.
--   How duplicate submissions are detected.
--   Which evidence and records must be preserved while an appeal is
-    open.
--   How an independent reviewer is selected.
-
-Notify eligible parties on appeal receipt and decision, as defined by
-the notification policy. Preserve the original decision and audit
-history; an appeal outcome must not erase the original action.
-
-### 6.6 Audit events
-
-Audit events are append-only records of privileged actions, state
-transitions, role changes, evidence access where required, enforcement
-actions, appeal outcomes, and relevant administrative failures.
-
-Recommended fields:
-
--   `id` (globally unique identifier)
--   `occurred_at`
--   `actor_user_id` (nullable for system actions)
--   `actor_role_snapshot`
--   `action`
--   `target_type`
--   `target_id`
--   `request_id` or correlation ID
--   `reason` where applicable
--   `metadata` containing only approved, non-secret details
-
-If the table is partitioned by month and uses a composite primary key
-such as `(id, occurred_at)`, the API must not assume `id` alone is a
-database-enforced unique lookup unless a separate global uniqueness
-mechanism guarantees it. Either use a globally unique unpartitioned
-identifier registry, require the partition key in lookups, or use a
-schema/index strategy that guarantees the intended semantics. Document
-the chosen approach and make `GET /admin/audit-events/{id}` match it.
-
-Audit writes for a privileged decision must be in the same transaction
-as the decision. Do not permit application clients to update or delete
-audit events. Define partition creation, retention, archival, and query
-behavior before enabling monthly partitioning in production.
-
-### 6.7 Transactional outbox and notifications
-
-Moderation decisions may produce notifications. The business state
-change, corresponding audit event, and outbox event must be committed in
-one database transaction.
-
-Use one shared `outbox_events` contract for moderation and the
-notification system. Do not create two independent outbox designs with
-incompatible event IDs, status fields, retry rules, or ownership. The
-notification specification may define richer notification and delivery
-tables downstream, but the source event must come from the same
-transactional outbox.
-
-At minimum, an outbox event needs:
-
--   `id`
--   `event_type`
--   `aggregate_type` and `aggregate_id`
--   `occurred_at`
--   schema/version identifier
--   payload containing approved event facts, not secrets
--   processing status/lease metadata or an equivalent relay mechanism
--   retry and error metadata
-
-Postgres is authoritative. Workers may use `FOR UPDATE SKIP LOCKED` or
-another safe claim strategy with a short transaction/lease. Never hold a
-database transaction open while calling an email provider. Design for
-at-least-once processing, idempotent database effects, and provider
-idempotency where supported; do not promise exactly-once email delivery.
-
-The notification service should use a unique notification identity such
-as `(event_id, recipient_id, notification_kind)`, not timestamps.
-Preserve delivery-attempt history and deduplicate provider webhooks. If
-the provider may have accepted a message before a worker crash,
-represent the result as ambiguous/reconcilable rather than assuming
-delivery failed.
-
-------------------------------------------------------------------------
-
-## 7. State Machines and Transition Rules
-
-Every workflow must have an authoritative transition table maintained
-with the implementation. For each transition, specify:
-
--   Current state and permitted next state.
--   Actor roles allowed to request the transition.
--   Required reason, evidence, or other input.
--   Version/lease checks.
--   Audit event type.
--   Notification event type, if applicable.
--   Retention or appeal implications.
-
-The backend must reject all transitions not listed in the applicable
-table. Do not expose generic endpoints that allow clients to set
-arbitrary status values.
-
-### 7.1 Verification
-
-Use the verification transitions in Section 6.2 as the starting point.
-Final approval/rejection requires a current authorized reviewer, a valid
-case version, and any required lease. Escalated cases require a
-superadmin decision.
-
-### 7.2 Content moderation
-
-Define separate states for pending review, in review, escalated,
-approved/allowed, hidden/taken down, removed, and restored as needed by
-the product. Avoid ambiguous states that combine queue ownership with
-content visibility. Queue/lease status and content lifecycle status
-should be separate fields or entities.
-
-### 7.3 Enforcement
-
-Sanction creation, modification, expiry, and reversal must be explicit
-actions with audit records. A sanction must have a clear scope and
-duration or review condition. Automatic expiry should create a traceable
-system event.
-
-### 7.4 Appeals
-
-Appeal receipt and appeal decision are separate transitions and
-notification events. The appeal decision must reference the original
-action and preserve both histories.
-
-------------------------------------------------------------------------
-
-## 8. API Design
-
-Use the `/admin` prefix for staff-only APIs. The exact route names may
-be adapted to the existing application, but the authorization,
-concurrency, and transaction rules below are mandatory.
-
-### 8.1 General rules
-
--   Authenticate every request.
--   Authorize every operation on the server using current application
-    state.
--   Validate all input and reject unknown or unsupported state values.
--   Use server-generated timestamps.
--   Return a stable request/correlation ID.
--   Do not return private evidence URLs or sensitive metadata to
-    unauthorized users.
--   Use consistent error responses.
--   Record successful privileged decisions and relevant denied high-risk
-    operations according to the audit policy.
-
-Suggested status behavior:
-
--   `401`: no valid authenticated identity.
--   `403` or policy-selected `404`: authenticated but not authorized.
--   `404`: target does not exist or is intentionally concealed.
--   `409`: stale version, lost lease, duplicate/conflicting transition,
-    or idempotency-key payload mismatch.
--   `422`: syntactically valid request that violates workflow/business
-    validation.
--   `429`: rate limited.
-
-### 8.2 Idempotency
-
-For decision endpoints that may be retried, accept an idempotency key.
-Scope it by actor and operation, and store a request fingerprint plus
-the original result. Reuse of the same key with the same payload returns
-the original result; reuse with a different payload returns
-`409 Conflict`.
-
-Do not use timestamps as idempotency identity. Idempotency does not
-replace database constraints or concurrency control.
-
-### 8.3 Suggested endpoint groups
-
--   `GET /admin/queue`
--   `POST /admin/tasks/{task_id}/claim`
--   `POST /admin/tasks/{task_id}/heartbeat`
--   `POST /admin/tasks/{task_id}/release`
--   `POST /admin/verification-cases/{case_id}/transition`
--   `POST /admin/submissions/{submission_id}/moderation-actions`
--   `POST /admin/reports/{report_id}/transition`
--   `POST /admin/enforcement-cases/{case_id}/actions`
--   `POST /admin/appeals`
--   `POST /admin/appeals/{appeal_id}/decision`
--   `GET /admin/audit-events`
--   `GET /admin/audit-events/{id}` (only if the ID lookup semantics in
-    Section 6.6 are guaranteed)
--   `POST /admin/staff/{user_id}/role` and/or a dedicated grant/revoke
-    endpoint
--   `GET /admin/monitoring/summary`
-
-These are logical endpoint suggestions, not permission to create
-duplicate routes if the application already has equivalent endpoints.
-
-### 8.4 Bulk actions
-
-Bulk requests must be explicit about partial success. Each item is
-atomic on its own; the batch may partially succeed. Return a per-item
-result containing success/failure, status, and a safe error code. If a
-true all-or-nothing batch is required for a particular operation,
-implement it as a separate transactionally validated operation and
-document its limits.
-
-### 8.5 Concurrency contract
-
-For every decision endpoint:
-
-1.  Re-read authoritative role/account state.
-2.  Validate actor eligibility and target ownership/visibility.
-3.  Validate the current state and expected version.
-4.  Validate claim lease ownership where applicable.
-5.  Apply the transition and write the immutable action/audit event.
-6.  Insert any resulting outbox event.
-7.  Commit once.
-
-If any required check fails, do not partially apply the decision. Return
-a conflict or authorization error as appropriate.
-
-------------------------------------------------------------------------
-
-## 9. API and Database Error Handling
-
--   Stale version: `409`, with a safe indication that the client should
-    reload.
--   Lost/expired lease: `409`; do not silently reclaim the task during a
-    decision.
--   Unauthorized action: `403` or policy-selected `404`.
--   Invalid transition: `422`.
--   Duplicate appeal or disallowed second appeal: stable
-    conflict/business error.
--   Database or provider transient failure: retry only operations
-    designed to be idempotent.
--   Avoid returning SQL, stack traces, secrets, signed URLs, or internal
-    policy details to the browser.
-
-For multi-step decisions, prefer a single database transaction or a
-narrowly scoped database function so validation, state change, audit
-write, and outbox insertion cannot drift apart.
-
-------------------------------------------------------------------------
-
-## 10. Retention and Deletion
-
-Retention is a policy requirement, not merely a cleanup-job setting.
-
--   Rejected verification cases: proposed default of 30 days before
-    purge, subject to the exceptions below.
--   Standard user notifications: 90 days.
--   Critical account-decision notifications: 24 months.
--   Preserve notification items tied to an open appeal while the appeal
-    remains open.
--   Preserve relevant evidence and records while an appeal is open, a
-    legal hold applies, or a documented policy requires retention.
--   Define evidence retention after approval and for withdrawn/closed
-    cases before implementation.
--   Define separate retention rules for audit events, moderation
-    actions, sanctions, reports, and delivery-attempt history.
-
-A cleanup job must re-check preservation conditions immediately before
-deletion. Avoid a race in which an appeal opens after a cleanup job
-selects an item but before it deletes the evidence. Use transactional
-locking or an equivalent safe protocol. `purge_after` is a candidate
-eligibility time, not unconditional permission to delete.
-
-When deletion is required, delete the underlying object and metadata
-consistently and record the deletion event where policy requires it.
-Avoid retaining unnecessary personal or sensitive data in audit
-metadata.
-
-------------------------------------------------------------------------
-
-## 11. Notification Integration
-
-The moderation dashboard should emit domain events; it should not
-directly send email from a request handler.
-
-Apply the companion notification specification and these finalized
-policy decisions:
-
-``` json
-{
-  "email_address_policy": "current_verified_at_send",
-  "notification_retention": {
-    "standard_days": 90,
-    "critical_account_decisions_months": 24,
-    "preserve_while_appeal_open": true
-  },
-  "appeals": {
-    "enabled_for_all_policy_eligible_decisions": true,
-    "notify_on_receipt": true,
-    "notify_on_decision": true,
-    "include_deadline_and_case_reference": true
-  },
-  "staff_recipients": {
-    "resolution_policy": "event_based",
-    "capture_intended_recipients": true,
-    "recheck_current_authorization": true
-  },
-  "digest": {
-    "enabled": true,
-    "frequency": "daily",
-    "timezone": "recipient_configured",
-    "include_critical_events": false
-  }
-}
+**Version:** 2.0 (31 October 2026). Restructures v1 (22 October 2026) into Frontend, Backend and Database parts and aligns it with the implemented system.
+**Status:** Implemented 27 October 2026, except the items marked **Planned** (section 12).
+**Base path:** every route below is under `/api/v1`.
+**Companion documents:** `Docs/Notification-Documentation.md` (notifications), `Docs/api/API.md` 5.17 to 5.21 (wire contract), `Docs/Schema.md` (tables), `Docs/Decisions.md` (owner decisions), `Docs/System-Monitoring-Dashboard.md` (ops dashboard).
+
+Where this document and `API.md` differ on a request or response shape, `API.md` and the OpenAPI snapshot (`Docs/api/openapi-v1.json`) win and this document is corrected.
+
+---
+
+## 1. Purpose and scope
+
+The moderation dashboard is the staff workspace in which moderators and superadmins:
+
+- review submitted reviews and their photos and videos (publish, hide, reject, restore);
+- handle reports against published reviews;
+- verify members, ask for clarification, and escalate exceptional cases;
+- take down content, restrict or suspend accounts, and reverse those actions;
+- decide appeals independently of the original decision-maker;
+- manage staff roles (superadmins only);
+- inspect the audit trail and queue health.
+
+Every decision is authorised on the server, recorded in an append-only audit log, and produces its notification through the shared transactional outbox (Notification spec).
+
+## 2. Review of the owner's design
+
+The owner's draft (22 October 2026) proposed one login, a hybrid queue, routine verification by moderators with escalation, a private `/admin` URL that never logs out, per-moderator keys, 30-day retrieval of rejections, hide-but-still-count, suspensions, appeals and notifications. The verdict on each point:
+
+| Proposal | Verdict | Resolution |
+|---|---|---|
+| One login page for members and staff | **Keep** | One Supabase Auth account. Staff are members with an active row in `user_roles`. |
+| Hybrid queue (assigned plus claimable) | **Keep** | Database leases of 5 minutes, renewed by heartbeat. Superadmins can assign a task to a person. |
+| Moderators verify routine cases, superadmins decide escalated ones | **Keep** | Enforced in the transition rule on the server, not just in the UI. Escalated cases need `superadmin`. |
+| Private `www.abhijatri.com/admin` that "cannot be reached" | **Corrected** | The dashboard is a separate build on `admin.<owned-domain>` (`staff/`). Its privacy comes from authorisation, not the URL: non-staff get `404` from every `/admin/*` route. A secret URL is not a security boundary. |
+| Access "never lost" until the role is removed | **Corrected** | Access lasts while the role is active **and** the session is valid. Sessions renew on use (refresh cookie 30 days), so an active moderator stays signed in. A superadmin idle for 8 hours signs in again. Revoking a role takes effect on the next request. A session that can never expire would be the single biggest risk in the system. |
+| Assign roles from the dashboard during development, move to the database later | **Corrected** | Keep dashboard assignment permanently. It is safer than editing the database by hand, because it is serialised, needs a fresh password, protects the last superadmin, and is audited. Direct SQL edits skip all of that and should be used only for the first superadmin (`python -m app.jobs.bootstrap_admin`). |
+| A key for each moderator and each task | **Replaced** | No reusable moderator secrets. Identity is the authenticated user id. Each task, case and request has a UUID and a request id. The audit log records actor, role snapshot, action, target and request id for every decision. |
+| Reject goes to "Rejected" for 30 days with retrieval | **Keep, partly built** | Rejected verification cases and their evidence are purged after 30 days unless an appeal is open (implemented). A staff "Rejected" list and the 30-day purge of rejected reviews are **Planned** (P-03). |
+| Hide: not public, but still counted in the rating | **Changed (owner, 31 Oct)** | A hidden review leaves the rating by default (Review.md line 476). For a takedown, the moderator may set `counts_toward_rating: true` to keep the rating of a genuine review hidden for a privacy problem. Wiring that flag into the rating is P-00. |
+| Moderators see fellow moderators; only superadmins change roles | **Keep, partly built** | Role changes are superadmin-only (implemented). A read-only staff list for moderators is **Planned** (P-04). |
+| Assign moderators from the Verified Members list | **Keep, partly built** | Today a superadmin finds a person by email. A Verified Members list, and a rule that a new moderator must be a Verified Member, are **Planned** (P-02). |
+| Suspension ends automatically | **Keep, gap found** | Expiry is done by the retention job, which has no schedule in production yet. **Planned** (P-01): schedule it and also check the end time on every request. |
+| Appeals and a full notification system | **Keep** | Implemented: 30-day appeal window (Asia/Dhaka), one appeal per decision, independent reviewer, notices on receipt and decision. |
+
+### 2.1 Supabase Auth versus Platform Foundation 8.1
+
+Platform Foundation 8.1 called for first-party authentication without Supabase Auth. On 27 October 2026 the owner chose Supabase Auth (`Docs/Decisions.md`). The decision stands, with the safeguard that kept Platform Foundation's intent: **the browser never calls Supabase.** The API proxies sign-up, sign-in, reset and TOTP, keeps tokens in `HttpOnly` `__Host-` cookies, and no Supabase key reaches either frontend.
+
+## 3. Architecture
+
+```
+ Public app (Vite, app.<domain>)        Staff dashboard (Vite, admin.<domain>)
+   member pages: verification,            Queue · Inbox · Media · Enforcement
+   appeals, reports, notifications        Audit · Monitoring · Staff* · Notifications*
+                \                                   /            (* superadmin)
+                 \        HTTPS, cookies, CSRF      /
+                  v                                v
+                 FastAPI backend (/api/v1, Render, Singapore)
+   auth proxy · role check · CSRF · idempotency · leases · transitions
+   audit · outbox · notification worker (in process) · retention job
+          |                    |                      |
+          v                    v                      v
+   Supabase Postgres    Supabase Storage        Upstash Redis
+   (system of record)   (private buckets)       (counters only)
 ```
 
-Additional requirements:
+### 3.1 Database choice
 
--   Resolve a user's email from the current verified address at send
-    time.
--   Capture the intended staff recipients for an event, then re-check
-    current authorization before disclosing sensitive details.
--   Send appeal notifications on receipt and decision for every
-    policy-eligible appeal.
--   Daily digests use the recipient's configured timezone and exclude
-    critical/time-sensitive events.
--   Critical/time-sensitive notices are handled outside the daily digest
-    path.
--   Keep urgency/priority separate from delivery mode.
--   Use versioned immutable templates, typed variables, and controlled
-    recipient resolvers.
--   Store email suppression identifiers as an HMAC of normalized email,
-    not a plain hash.
--   The in-app inbox is owner-only; clients cannot insert notification
-    rows directly.
--   Realtime inbox updates are best effort. The inbox database remains
-    authoritative.
--   Notification-system failure must be monitored through an independent
-    operational path; do not rely only on the notification system to
-    report its own failure.
+**Recommendation: Supabase Postgres as the only system of record, Upstash Redis for counters only. Do not add Cassandra or MongoDB.**
 
-------------------------------------------------------------------------
+| Store | Use in Abhijatri | Why |
+|---|---|---|
+| **Supabase Postgres** | Everything that must be correct: roles, tasks and leases, cases, sanctions, appeals, audit, outbox, notifications. | Moderation is transactional. A decision must change the review, write the action, the audit row and the outbox event in **one commit**, with row locks, unique constraints and version checks. Only a relational database gives that across tables. |
+| **Upstash Redis** | Daily visit counters (in use). Later, if measured: a short role cache, rate limits, a fast queue signal. | Fast and cheap for disposable numbers. Never authoritative: if Redis is lost, no decision or task state is lost. |
+| **Supabase Storage** | Verification evidence and review media in private buckets. | Files do not belong in table rows. Access only through short-lived signed URLs issued after a server-side check. |
+| Cassandra | Not used. | Built for very large write volumes across data centres. It has no multi-row transactions or joins, which moderation needs. Abhijatri's volume is far below where it pays off. |
+| MongoDB | Not used. | Moderation data is relational (case → task → action → appeal → audit). A second database would split the source of truth and break single-transaction decisions. |
 
-## 12. Monitoring, Audit Review, and Operations
+Speed for the user comes from indexes, keyset pagination, small payloads and the outbox (the request returns before any email is sent), not from a second database. Revisit only when a measurement shows a need (section 11.4).
 
-Monitor at least:
+---
 
--   Queue depth and age of oldest eligible task.
--   Expired claims and repeated claim conflicts.
--   Verification and moderation decision latency.
--   Escalation volume and unresolved escalations.
--   Appeal volume, deadline proximity, and overdue appeals.
--   Authorization denials and suspicious role-management attempts.
--   Outbox backlog, oldest unprocessed event, retry count, and
-    dead-letter/terminal failures.
--   Email provider failures, bounce/complaint events where available,
-    and ambiguous delivery outcomes.
--   Cleanup-job failures and retention items blocked by open appeals.
--   Database errors, latency, and storage access failures.
+# Part A: Frontend
 
-Define thresholds, an operational owner, and a response procedure for
-each alert before production. Ensure critical monitoring can reach
-operators even if the in-app notification or email pipeline is
-unavailable.
+## 4. Applications
 
-Review audit logs for role changes, high-impact actions, repeated
-denials, and unusual access patterns. Avoid logging evidence contents,
-credentials, tokens, or unnecessary personal data.
+| App | Folder | Host | Users |
+|---|---|---|---|
+| Public app | `frontend/` | `app.<owned-domain>` (Vercel) | Guests and members |
+| Staff dashboard | `staff/` | `admin.<owned-domain>` (Vercel) | Moderators and superadmins |
+| Ops dashboard | `ops/` | separate, bearer token | Operator (System-Monitoring-Dashboard.md) |
 
-------------------------------------------------------------------------
+Both Vite apps call the API with `credentials: 'include'`, send `X-CSRF-Token` on writes, and hold no Supabase key. The staff app reads `VITE_API_BASE_URL`.
 
-## 13. Implementation Phases
+## 5. Staff dashboard
 
-### Phase 0 --- Inspect before migration
+### 5.1 Sign-in and session
 
--   Inspect current routes, schema, migrations, RLS policies, storage
-    policies, authentication settings, and existing
-    moderation/notification code.
--   Map current implementation to this specification.
--   Identify reusable tables/routes and conflicting constraints.
--   Back up and prepare a rollback plan before any production migration.
--   Do not create duplicate systems without documenting why.
+1. The staff member signs in with the same email and password as on the public app (`POST /auth/login`).
+2. The dashboard opens only when `GET /auth/session` returns `role` (`moderator` or `superadmin`) and `aal: "aal2"`. First-time staff enrol an authenticator (`POST /auth/mfa/enroll`, then `/auth/mfa/verify`). Later sign-ins ask for the 6-digit code.
+3. A member without a role sees the sign-in screen only; the API answers `404` to every `/admin/*` call.
+4. High-impact actions (role changes) ask for the password again (`POST /auth/reauth`, valid 10 minutes).
+5. On `401 AUTH_REQUIRED` the app returns to sign-in; on `403 REAUTH_REQUIRED` it opens the password prompt and retries.
 
-### Phase 1 --- Security and transaction foundation
+### 5.2 Screens
 
--   Implement and test the one-active-staff-role invariant.
--   Implement race-safe last-superadmin protection.
--   Enforce current authorization for sensitive actions.
--   Define stable transition tables and version/lease checks.
--   Ensure decisions, audit events, and outbox events commit atomically.
--   Add idempotency-key storage and request fingerprint validation where
-    needed.
+| Tab | Who | Purpose | API |
+|---|---|---|---|
+| Queue | staff | Reviews, reports, verification cases and appeals in one list, filterable by `task_type`. Claim, decide, escalate, release. | `GET /admin/queue`, task and decision routes |
+| Inbox | staff | Staff notifications (assignments, escalations, alerts). Polls every 30 s. | `GET /notifications` |
+| Media | staff | Recent photos and videos and their state; correct a decision. | `GET /admin/media`, `POST /admin/media/{id}/decision` |
+| Enforcement | staff | Takedowns and account cases with their sanctions; open, remove, restore, reverse. | `/admin/enforcement-cases*` |
+| Audit | staff | Search the audit trail by action, target, actor and date. | `GET /admin/audit-events` |
+| Monitoring | staff | Queue depth, oldest task, escalations, expired claims, open reports, outbox backlog, denials. | `GET /admin/monitoring/summary` |
+| Staff | superadmin | Find a person, grant or revoke `moderator` / `superadmin`. | `GET /admin/staff`, `GET /admin/users`, `POST /admin/staff/{id}/role` |
+| Notifications | superadmin | Deliveries, outbox, suppressions, templates, rules. | Notification spec section 9 |
 
-### Phase 2 --- Content moderation
+The tab list is a role-filtered array in `staff/src/App.tsx`. Hiding a tab is a convenience; the server refuses the call anyway.
 
--   Implement task claims, lease renewal, release, and decision-time
-    eligibility checks.
--   Separate task/lease state from content visibility.
--   Implement moderation action history and report workflows.
--   Test concurrent claims, stale tabs, escalation during review, and
-    retries.
+### 5.3 Queue interaction rules
 
-### Phase 3 --- Verification
+- **Claim before deciding.** "Open" calls `claim` and stores the returned `lease_token`. The decision form is disabled without a live lease.
+- **Heartbeat** every 60 seconds while the task is open; the server lease is 5 minutes. A `moderation.task_lease_expiring` notice warns one minute before expiry.
+- **Release** when the moderator leaves without deciding.
+- **Send `expected_version`** with every decision. On `409 REVIEW_VERSION_CONFLICT` or `409 LEASE_LOST`, show "This item changed. Reload." and refetch. Never retry a decision automatically with a new version.
+- **Send an `Idempotency-Key`** (one per decision attempt) so a double click or network retry cannot apply a decision twice.
+- **Escalated items** show who they need. A moderator can see but not decide them (`403`).
+- **Own content and own cases** cannot be decided (`403 SELF_MODERATION_FORBIDDEN`); the form says so.
+- **Evidence** opens through a 60-second signed URL requested on click, never preloaded or cached.
+- **Bulk actions** (up to 25) show the per-item result list the API returns; partial success is normal.
 
--   Implement verification transitions and evidence authorization.
--   Add optimistic concurrency or row-lock protection.
--   Implement clarification requests, approval/rejection, escalation,
-    and retention exceptions.
--   Test signed URL expiry, unauthorized evidence access, and
-    cleanup/appeal races.
+### 5.4 States every screen handles
 
-### Phase 4 --- Enforcement and appeals
+Loading, empty, error with retry, offline (`NETWORK_ERROR`), stale (conflict, reload), and forbidden. Text is Bangla and English (`makeT`).
 
--   Implement explicit takedown/removal/restoration and sanction
-    lifecycle.
--   Implement appeal eligibility, deadlines, duplicate policy,
-    independent review, and preservation rules.
--   Emit appeal-receipt and appeal-decision outbox events.
--   Test concurrent appeal submission, expired deadlines, and
-    original-decision preservation.
+## 6. Public app (member side of moderation)
 
-### Phase 5 --- Outbox, notifications, and monitoring
+| Route | Purpose | API |
+|---|---|---|
+| `/account/verification` | Apply, upload evidence (up to 3 files, 5 MB, JPEG/PNG/PDF), answer clarification questions, withdraw. | `/verifications*` |
+| `/account/reviews` | The member's reviews and their moderation state. | review routes |
+| `/account/appeals` | Decisions that can be appealed, with deadline; file and withdraw appeals. | `GET /appeals/mine`, `POST /appeals` |
+| Report button on a published review | Report with a reason code. | `POST /reviews/{id}/reports` |
+| `/account/notifications` and the bell | Decisions and outcomes. | Notification spec |
 
--   Implement the shared PostgreSQL outbox and downstream
-    notification/delivery records.
--   Add retry handling, delivery-attempt history, provider webhook
-    deduplication, and ambiguous delivery reconciliation.
--   Implement daily digest behavior and current-verified-email
-    resolution.
--   Add independent operational monitoring.
--   **Redis/BullMQ is optional** and should be added only if measured
-    throughput, latency, or scheduling needs justify it. PostgreSQL
-    remains authoritative.
+Evidence files are uploaded straight to the one-time `upload_url` (private bucket) and confirmed with `.../complete`. The browser never sees a Storage key.
 
-### Phase 6 --- Production validation
+## 7. Extending the frontend
 
--   Run role-based authorization tests for every endpoint.
--   Run concurrency tests for last-superadmin protection, claims, state
-    transitions, and appeals.
--   Run failure-injection tests for worker crashes before/after provider
-    acceptance.
--   Validate retention, appeal preservation, and cleanup race behavior.
--   Verify backups, recovery, alert ownership, and rollback procedures.
--   Do not enable production traffic until critical security and
-    data-integrity tests pass.
+To add a new staff screen: add a component under `staff/src/screens/`, add one entry to the `tabs` array with its role condition, add its calls to `staff/src/api.ts`, and add its labels in both languages. The server route must exist and enforce the role first; the tab is only a view of it.
 
-------------------------------------------------------------------------
+---
 
-## 14. Required Acceptance Tests
+# Part B: Backend
 
-Before production, verify at least the following:
+## 8. Module map
 
-1.  A user cannot hold two active staff roles.
-2.  Two concurrent role-revocation requests cannot remove the last
-    active superadmin.
-3.  A revoked moderator cannot perform a sensitive action through a
-    stale session or cached role.
-4.  Two staff members cannot hold simultaneously valid claims for the
-    same exclusive task.
-5.  A moderator cannot decide an escalated case after escalation, even
-    from a stale tab.
-6.  A stale case version cannot overwrite a newer decision.
-7.  A failed decision transaction leaves no orphaned audit or outbox
-    event.
-8.  A successful decision cannot commit without its required audit and
-    outbox records.
-9.  A reused idempotency key with a different payload returns a
-    conflict.
-10. An ineligible or late appeal is rejected consistently by the
-    backend.
-11. An open appeal prevents relevant evidence/notification cleanup.
-12. Cleanup re-checks appeal/legal-hold state immediately before
-    deletion.
-13. Unauthorized users cannot access private evidence or inbox records.
-14. An outbox worker crash after provider acceptance does not cause the
-    system to claim exactly-once delivery.
-15. Duplicate provider webhooks do not duplicate delivery state changes.
-16. Audit-event lookup behavior matches the actual uniqueness and
-    partitioning design.
-17. Critical alerts remain observable when the notification delivery
-    system is down.
-18. Bulk API responses clearly report per-item success and failure.
+| Module | Responsibility |
+|---|---|
+| `app/auth/` | Supabase Auth proxy, cookies, CSRF, TOTP, re-authentication, superadmin inactivity limit, `Principal` (user, current role, aal). |
+| `app/admin/routes.py` | `/admin/*` HTTP layer. |
+| `app/admin/tasks.py` | Queue, claim, heartbeat, release, assign, escalate (leases). |
+| `app/admin/actions.py` | Review moderation decisions and bulk actions. |
+| `app/admin/cases.py` | Verification, reports, enforcement, sanctions, appeals. |
+| `app/admin/roles.py` | Staff role grant and revoke. |
+| `app/admin/audit.py` | Append-only audit writes and queries. |
+| `app/admin/idempotency.py` | Stored results for retried decisions. |
+| `app/member_routes.py` | Member verification, appeals, reports, notifications. |
+| `app/notify/` | Outbox events, worker, delivery (Notification spec). |
+| `app/jobs/retention.py` | Purges and sanction expiry. |
+| `app/jobs/bootstrap_admin.py`, `reset_mfa.py` | First superadmin; TOTP reset. |
 
-------------------------------------------------------------------------
+## 9. Request pipeline
 
-## 15. Decisions Locked for V1
+Every staff decision runs these steps in order, in **one** database transaction:
 
--   One active staff role per user.
--   Supabase Postgres is the system of record.
--   Shared authentication; server-side authorization is authoritative.
--   Hybrid queue with database-backed leases.
--   Current authorization checks for sensitive actions.
--   Version-checked or row-locked state transitions.
--   Audit writes and outbox writes are transactional with business
-    decisions.
--   A single shared outbox contract feeds notifications.
--   At-least-once event processing; no exactly-once email guarantee.
--   Rejected verification retention target: 30 days, with preservation
-    exceptions.
--   Standard notification retention: 90 days; critical account-decision
-    notifications: 24 months; preserve relevant notifications and
-    evidence while an appeal is open.
--   Appeal notifications on receipt and decision for all policy-eligible
-    appeals.
--   Daily recipient-timezone digest excludes critical/time-sensitive
-    events.
--   Redis remains optional until measured need justifies it.
+1. **Authenticate.** Read the session cookie; refresh once if expired; reject a disabled account (`403 ACCOUNT_DISABLED`).
+2. **Authorise.** Read the role from `user_roles` in the database (never from the token or the body). No role: `404`. Role too low: `403`, written to the audit log as `denied.<action>`.
+3. **CSRF and origin** for cookie-authenticated writes.
+4. **Idempotency.** Same key and payload returns the stored result; same key, different payload is `409 IDEMPOTENCY_KEY_REUSED`.
+5. **Lease.** The task is held by the caller with this `lease_token` and is not expired, else `409 LEASE_LOST`. A decision never reclaims a lease silently.
+6. **State and version.** The target's current state allows the transition (`422 TRANSITION_NOT_ALLOWED`) and `expected_version` matches (`409 ..._VERSION_CONFLICT`).
+7. **Policy checks.** Escalation role, self-moderation, evidence present, independent appeal reviewer.
+8. **Write** the new state, the immutable action row, the audit row and the outbox event.
+9. **Commit once.** Any failure rolls back all of it; no orphan audit or outbox rows.
 
+The actor id always comes from the session. A `user_id`, `role` or `actor_id` in a request body is never trusted as authority.
 
+## 10. Permission matrix (enforced on the server)
+
+| Action | Member | Moderator | Superadmin |
+|---|---|---|---|
+| Submit a review, report a published review | Yes | Yes | Yes |
+| Apply for verification, answer clarification | Yes | Yes | Yes |
+| See and claim queue tasks | No | Yes | Yes |
+| Publish, request changes, hide, reject, restore a review; decide media | No | Yes | Yes |
+| Approve, reject, ask clarification on routine verification | No | Yes | Yes |
+| Decide an escalated task or case | No | No | Yes |
+| Open a takedown, warning or posting restriction | No | Yes | Yes |
+| Apply a suspension | No | No | Yes |
+| Emergency takedown follow-up | No | No | Yes |
+| Decide an appeal | No | Yes, if not the original decider | Yes, if not the original decider |
+| Assign a task to a person | No | No | Yes |
+| Grant or revoke staff roles | No | No | Yes, with password within 10 min |
+| Read audit events, monitoring summary | No | Yes | Yes |
+| Notification operations (deliveries, templates, suppressions) | No | No | Yes |
+| Decide one's own review, case or appeal | No | No | No |
+
+## 11. Workflows
+
+### 11.1 State machines
+
+The server rejects any transition not listed. There is no generic "set status" endpoint.
+
+**Review moderation** (`reviews.status`, decision via `moderation-actions`)
+
+| From | Decision | To | Effect on rating |
+|---|---|---|---|
+| `PENDING`, `UNDER_REVIEW` | `PUBLISH` | `PUBLISHED` | Counted |
+| `PENDING`, `UNDER_REVIEW` | `REQUEST_CHANGES` | `CHANGES_REQUESTED` (author edits and resubmits) | Not counted |
+| `PENDING`, `UNDER_REVIEW` | `REJECT` | `REJECTED` | Not counted |
+| `PUBLISHED` | `HIDE` | `HIDDEN` | Removed from the rating. A takedown with `counts_toward_rating: true` keeps it (P-00, owner decision 31 Oct) |
+| `HIDDEN` | `RESTORE` | `PUBLISHED` | Counted again |
+
+Every rating change goes through the locked delta path on `destination_rating_stats`, in the same transaction as the decision.
+
+**Verification case**: `submitted → in_review → needs_clarification → in_review → approved | rejected`; any review state `→ escalated` (superadmin decides); applicant may `withdraw`. Approval needs at least one uploaded file and writes a `verifications` row. Verification and staff role are separate.
+
+**Report**: `open → in_review | actioned | dismissed`; `in_review → actioned | dismissed`.
+
+**Enforcement case and sanction**: opening a case on a review hides it and records `counts_toward_rating`. Actions: `remove`, `restore`, `close`, `reverse_sanction`. Sanction kinds: `warning`, `posting_restriction`, `suspension` (superadmin only; disables the account while active). Every sanction has `ends_at` or `review_on`. Emergency takedowns get `follow_up_due_at` (24 h) and a superadmin task.
+
+**Appeal**: `received → in_review → upheld | overturned`; `withdrawn` while open. Overturning restores a hidden review, returns a rejected review to the queue, grants a rejected verification, or reverses an enforcement and its sanctions. The original decision row is kept.
+
+### 11.2 Appeal policy
+
+- Appealable: review moderation actions, enforcement cases, verification decisions.
+- Deadline: end of the 30th day after the decision, Asia/Dhaka (`409 APPEAL_WINDOW_CLOSED`).
+- One appeal per decision (`409 DUPLICATE_APPEAL`), including after it is decided; a withdrawn appeal may be filed again.
+- Reviewer must not be the original decider (`403 APPEAL_REVIEWER_NOT_INDEPENDENT`).
+- An open appeal blocks deletion of the evidence and notifications it relates to.
+
+### 11.3 Background jobs
+
+| Job | How it runs | Does |
+|---|---|---|
+| Notification worker | Thread in the API process, every 2 s; scanners every 60 s | Outbox to notifications and email, digests, alerts (lease expiring, queue overdue, escalations, denials). |
+| Retention | `python -m app.jobs.retention` (**no schedule yet**, P-01) | Purges decided verification evidence (24 h after approval, 30 days after rejection or withdrawal), expired notifications, processed outbox rows after 30 days; expires sanctions. Re-checks open appeals under a row lock immediately before deleting. |
+
+### 11.4 Scaling path
+
+Each step is triggered by a measurement, not by expectation:
+
+1. **Worker out of the API process** when the API runs more than one instance or the free plan's sleep delays notifications. The worker is already safe to run in parallel (`FOR UPDATE SKIP LOCKED`).
+2. **Role cache in Redis** (TTL 60 s, invalidated on change) for read-only screens if role lookups show up in latency. Decisions keep reading the database.
+3. **Audit partitioning by month** when `audit_events` passes about 10 million rows. `id` must stay globally unique so `GET /admin/audit-events/{id}` keeps working.
+4. **A Redis queue (or similar)** only if outbox lag stays above the 10-minute alert under normal load.
+
+## 12. Endpoint reference
+
+Conventions: staff routes need a session with a role and `aal2` (non-staff `404`, lower role `403`); writes need `X-CSRF-Token`; decisions accept `Idempotency-Key`; all responses are `no-store`. Full bodies are in `API.md` 5.18 and 5.19.
+
+### 12.1 Authentication (`/auth`)
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/auth/register`, `/auth/verify-email`, `/auth/resend-verification` | Account and email confirmation |
+| POST | `/auth/login`, `/auth/logout` | Session cookies |
+| GET | `/auth/session`, `/auth/csrf` | Session payload with `role` and `aal`; CSRF token |
+| POST | `/auth/password-reset/request`, `/auth/password-reset/confirm` | Reset; ends every session |
+| POST | `/auth/mfa/enroll`, `/auth/mfa/verify` | TOTP enrolment and step-up to `aal2` |
+| POST | `/auth/reauth` | Fresh password for high-impact actions |
+
+### 12.2 Queue and tasks
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| GET | `/admin/queue?task_type=&limit=` | staff | Open tasks, oldest and highest priority first, with `claimable` and `lease_active` |
+| POST | `/admin/tasks/{task_id}/claim` | staff | Take a 5-minute lease |
+| POST | `/admin/tasks/{task_id}/heartbeat` | holder | Extend the lease |
+| POST | `/admin/tasks/{task_id}/release` | holder | Return to the shared queue |
+| POST | `/admin/tasks/{task_id}/escalate` | holder | Needs a superadmin; lease ends |
+| POST | `/admin/tasks/{task_id}/assign` | superadmin | Assign to a person or unassign (`user_id: null`) |
+
+### 12.3 Content
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| POST | `/admin/submissions/{review_id}/moderation-actions` | staff | `PUBLISH`, `REQUEST_CHANGES`, `REJECT`, `HIDE`, `RESTORE`; optional `rejected_media_ids` (API.md 5.18 still omits `REQUEST_CHANGES` and should be updated) |
+| POST | `/admin/submissions/{review_id}/conflict` | staff | Declare a conflict of interest |
+| POST | `/admin/bulk/moderation-actions` | staff | Up to 25 decisions, per-item result |
+| POST | `/admin/submissions/{review_id}/media/{media_id}/url` | staff | 5-minute signed URL to inspect media |
+| GET | `/admin/media?state=&limit=` | staff | Recent media |
+| POST | `/admin/media/{media_id}/decision` | staff | Correct a media decision |
+| POST | `/reviews/{review_id}/reports` | member | Report a published review |
+| POST | `/admin/reports/{report_id}/transition` | staff | `in_review`, `actioned`, `dismissed` |
+
+### 12.4 Verification
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| GET | `/verifications/mine` | member | Own case and evidence state |
+| POST | `/verifications` | member | Open a case |
+| POST | `/verifications/{case_id}/evidence` | applicant | One-time upload URL |
+| POST | `/verifications/{case_id}/evidence/{evidence_id}/complete` | applicant | Confirm the upload |
+| POST | `/verifications/{case_id}/respond` | applicant | Answer clarification; back to the queue |
+| POST | `/verifications/{case_id}/withdraw` | applicant | Withdraw |
+| POST | `/admin/verification-cases/{case_id}/transition` | staff holding the task | `in_review`, `needs_clarification` (needs `note`), `approved`, `rejected`, `escalated` |
+| POST | `/admin/verification-cases/{case_id}/evidence/{evidence_id}/url` | holder or superadmin | 60-second signed URL; audited `evidence.viewed` |
+
+### 12.5 Enforcement and appeals
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| GET | `/admin/enforcement-cases?state=` | staff | Cases with review or account and sanctions |
+| POST | `/admin/enforcement-cases` | staff (suspension: superadmin) | Takedown or account action, optional sanction, `emergency`, `counts_toward_rating` |
+| POST | `/admin/enforcement-cases/{case_id}/actions` | staff (emergency: superadmin) | `remove`, `restore`, `close`, `reverse_sanction` |
+| GET | `/appeals/mine` | member | Own appeals and appealable decisions with deadlines |
+| POST | `/appeals` | member with standing | File an appeal |
+| POST | `/appeals/{appeal_id}/withdraw` | appellant | Withdraw |
+| POST | `/admin/appeals/{appeal_id}/decision` | staff holding the task, not the original decider | `upheld` or `overturned` with `note` |
+
+### 12.6 Staff, audit and monitoring
+
+| Method | Route | Who | Purpose |
+|---|---|---|---|
+| GET | `/admin/staff` | superadmin | Active staff and roles |
+| GET | `/admin/users?q=` | superadmin | Find an account by email (3+ characters, 10 rows) |
+| POST | `/admin/staff/{user_id}/role` | superadmin, fresh password | `moderator`, `superadmin` or `null`; `409 LAST_SUPERADMIN` |
+| GET | `/admin/audit-events?action=&target_type=&target_id=&actor_user_id=&before=&limit=` | staff | Audit search, newest first |
+| GET | `/admin/audit-events/{event_id}` | staff | One event (`id` is globally unique) |
+| GET | `/admin/monitoring/summary` | staff | Queue and system health counters |
+
+### 12.7 Planned (gaps against the owner's design)
+
+| ID | Change | Endpoint or job | Why |
+|---|---|---|---|
+| P-00 | **Decided 31 Oct 2026 (owner):** hidden reviews are not counted by default; a takedown with `counts_toward_rating: true` keeps the rating | In `open_enforcement` and the enforcement `actions` route, pass the flag to the rating delta path: when `true`, hiding keeps the review's counted rating (`rating_eligibility` stays eligible); when changed later, move the aggregate under the same lock. Plain `HIDE` from the queue always removes the rating. | The flag is stored today but has no effect, so the stored value and the rating can disagree. |
+| P-01 | Schedule retention and check sanction end time on every request | `POST /ops/jobs/retention` (ops token) called by a GitHub Actions cron like `visit-rollup.yml`; `_set_account_state` and `ensure_not_restricted` treat `ends_at < now` as expired and reverse it lazily | Today a suspension only ends when someone runs the job by hand. Expiry must not depend on one job. |
+| P-02 | Verified Members list; new moderators must be Verified Members | `GET /admin/members?verified=true&q=&after=&limit=` (superadmin); `POST /admin/staff/{id}/role` returns `422 NOT_VERIFIED_MEMBER` for `moderator` | Owner design: moderators are chosen from verified members. |
+| P-03 | Rejected and Hidden lists with 30-day recovery for reviews | `GET /admin/reviews?status=REJECTED\|HIDDEN&after=&limit=` (staff), each with `recoverable_until`; `POST /admin/submissions/{id}/moderation-actions` `REOPEN` (`REJECTED → PENDING`, superadmin, within 30 days); retention purges rejected review bodies and media after 30 days unless an appeal is open | Owner design: "Rejected" and "Hidden" segments, 30-day retrieval. |
+| P-04 | Moderators see fellow moderators | `GET /admin/staff` open to moderators with `display_name` and `role` only (no email) | Owner design. |
+| P-05 | Superadmin reopens a rejected verification within 30 days | `POST /admin/verification-cases/{id}/reopen` (`rejected → in_review`, reason required) | Today only an appeal can reverse it. |
+| P-06 | Explicit reason codes catalogue | `GET /admin/reason-codes` from one server list | Consistent decisions; the UI stops hard-coding codes. |
+
+## 13. Errors
+
+| Status | Code | Meaning |
+|---|---|---|
+| 401 | `AUTH_REQUIRED` | No valid session |
+| 403 | `ACCOUNT_DISABLED`, `ACCOUNT_RESTRICTED` | Account suspended or restricted |
+| 403 | `FORBIDDEN`, `REAUTH_REQUIRED`, `SELF_MODERATION_FORBIDDEN`, `APPEAL_REVIEWER_NOT_INDEPENDENT` | Staff, but not allowed |
+| 404 | `NOT_FOUND` | Missing, or a staff route for a non-staff caller |
+| 409 | `LEASE_LOST`, `TASK_NOT_AVAILABLE`, `REVIEW_VERSION_CONFLICT`, `IDEMPOTENCY_KEY_REUSED`, `LAST_SUPERADMIN`, `DUPLICATE_APPEAL`, `APPEAL_WINDOW_CLOSED`, `DUPLICATE_OPEN_REPORT`, `VERIFICATION_ALREADY_OPEN` | Conflict; reload or stop |
+| 422 | `TRANSITION_NOT_ALLOWED`, `EVIDENCE_REQUIRED`, `VALIDATION_FAILED` | Business or input rule |
+| 429 | `RATE_LIMITED` | Too many requests |
+
+Clients branch on `code`, never on `message`. No response carries SQL, stack traces, secrets or signed URLs to someone not entitled to them.
+
+## 14. Security rules
+
+1. Authorisation is read from the database on every staff request. A revoked role stops working on the next request, even with a valid session.
+2. Staff need TOTP (`aal2`). Superadmins sign in again after 8 hours idle. Role changes need a password entered within 10 minutes.
+3. The last superadmin cannot be removed; superadmin changes are serialised on `role_admin_guard`.
+4. No Supabase key, service-role key or Storage path is ever sent to a browser.
+5. Evidence and media are in private buckets; signed URLs last 60 s (evidence) or 5 min (media) and every evidence view is audited.
+6. Audit rows cannot be updated, deleted or truncated (database triggers). They contain no passwords, tokens, document images or email bodies.
+7. Denied staff attempts are audited; repeated denials raise `moderation.security_anomaly`.
+8. Test the negative path: every staff route is tested for anonymous, member, moderator, revoked-role and disabled-account callers.
+
+## 15. Extending the backend: adding a new workflow
+
+Example: a new task type such as "destination edit suggestion".
+
+1. **Database:** add the subject table with `state` and `version`; add the type to `ck_moderation_tasks_type`; one migration.
+2. **Transitions:** write a transition table (from, to, role, required fields) in a new function in `app/admin/cases.py` (or a new module), following the pipeline in section 9.
+3. **Route:** `POST /admin/<subjects>/{id}/transition` in `app/admin/routes.py`, using the existing role, lease, idempotency and audit helpers.
+4. **Queue:** create a `moderation_tasks` row when the subject is submitted; the queue, claim, lease, assign and monitoring work without change.
+5. **Notifications:** emit an outbox event and add a rule and template in `app/notify/registry.py` (Notification spec 18).
+6. **Appeals:** if appealable, add a typed foreign key column to `appeals` and extend `ck_appeals_one_target`.
+7. **Tests:** authorisation for every role, stale version, lost lease, double submit, and rollback leaving no audit or outbox row.
+8. **Docs:** add the routes to `API.md`, the table to `Schema.md`, the decision to `Decisions.md`.
+
+---
+
+# Part C: Database
+
+## 16. Tables
+
+All tables are in Supabase Postgres. RLS is on for every table and the `anon` and `authenticated` roles have **no grants**; only the API's database role reads or writes them.
+
+| Area | Table | Key constraints |
+|---|---|---|
+| Identity | `users` | `id` = Supabase Auth user id; `status` `active`/`disabled` |
+| Roles | `user_roles` | `role` in (`moderator`, `superadmin`); partial unique `(user_id) WHERE revoked_at IS NULL`; granted/revoked by and at |
+| Roles | `role_admin_guard` | Single row locked `FOR UPDATE` for superadmin changes |
+| Sessions | `auth_session_activity` | Last request per session for the 8-hour superadmin limit; no token stored |
+| Queue | `moderation_tasks` | type, subject, status, `required_role`, `escalated`, `assigned_to`, `claimed_by`, `lease_expires_at`, `lease_token`, `version`; partial unique `(task_type, subject_id) WHERE status = 'open'` |
+| Content | `reviews`, `review_revisions`, `review_media` | Review state machine, `version`, `counted_rating`; media states |
+| Content | `moderation_actions` | Append-only decision history |
+| Reports | `reports` | One open report per reporter and review |
+| Verification | `verification_cases`, `verification_evidence`, `verifications` | One open case per applicant; `purge_after`; evidence metadata only (files in Storage) |
+| Enforcement | `enforcement_cases`, `sanctions` | Exactly one subject (review or user); `counts_toward_rating`; `follow_up_due_at`; sanction needs an end or review date |
+| Appeals | `appeals` | Typed foreign keys to the three target tables, exactly one set; one non-withdrawn appeal per target; deadline; original decider |
+| Audit | `audit_events` | Globally unique `id`; triggers refuse UPDATE, DELETE, TRUNCATE; no FK to `users` so the log outlives accounts |
+| Retries | `idempotency_keys` | PK `(actor_user_id, operation, key)`, request fingerprint, stored result |
+| Outbox | `outbox_events` | Shared with notifications; unique `dedupe_key` |
+
+The Notification tables are listed in the Notification spec, Part C.
+
+## 17. Concurrency in the database
+
+- **Claims:** the task row is locked (`SELECT ... FOR UPDATE`), then status, role eligibility, assignment and live lease are checked inside the lock. Another live lease means `409 TASK_NOT_AVAILABLE`. A task assigned to someone else can be claimed only by a superadmin.
+- **Decisions:** `UPDATE ... WHERE id = :id AND version = :expected_version` and `version = version + 1`; zero rows means `409`.
+- **Superadmin changes:** lock `role_admin_guard`, re-count active superadmins inside the lock, then change.
+- **Appeal versus purge:** the retention job locks the case and re-checks for an open appeal before deleting; filing an appeal locks the same row.
+
+## 18. Retention
+
+| Data | Kept | Then |
+|---|---|---|
+| Verification evidence, approved case | 24 hours after approval | File deleted |
+| Rejected or withdrawn verification case and evidence | 30 days | Row and files deleted (unless an appeal is open) |
+| Rejected review | Indefinitely today | **Planned** P-03: body and media purged after 30 days unless appealed |
+| Sanctions, enforcement cases, appeals, moderation actions | Kept (account history) | Revisit with a privacy review |
+| Audit events | Kept, append-only | Partition and archive when large (11.4) |
+| Notifications | 90 days; critical 24 months; longer while an appeal is open | Deleted |
+| Processed outbox events | 30 days | Deleted |
+| Media uploads not completed | 24 hours | Deleted |
+
+`purge_after` makes a row a candidate; it never overrides an open appeal.
+
+## 19. Storage buckets
+
+| Bucket | Content | Access |
+|---|---|---|
+| `verification-evidence` | ID documents and other proof | Private; one-time upload URL; 60 s signed read URL for the holder of the case or a superadmin |
+| `review-media` | Review photos and video (`quarantine/` until checked) | Private; staff 5-minute URL; public feed 1-hour signed URL for approved media only |
+
+## 20. Redis
+
+Redis holds the daily visit counters (`abj:{env}:visits:{date}`, 8-day TTL) and nothing from moderation. If Redis is unavailable, moderation is unaffected. Any future use (role cache, rate limit) must be safe to lose and must never decide a write.
+
+---
+
+# Part D: Verification
+
+## 21. Acceptance tests
+
+Implemented in `backend/tests/` on PostgreSQL. Each must keep passing:
+
+1. A user cannot hold two active staff roles.
+2. Two concurrent revocations cannot remove the last superadmin.
+3. A revoked moderator is refused on the next request.
+4. Two staff cannot hold valid leases on the same task.
+5. A moderator cannot decide an escalated task from a stale tab.
+6. A stale version cannot overwrite a newer decision.
+7. A failed decision leaves no audit or outbox row; a successful one always has both.
+8. A reused idempotency key with another payload returns `409`.
+9. A late or duplicate appeal is refused; the original decider cannot decide the appeal.
+10. An open appeal blocks evidence and notification purges.
+11. Members and other staff cannot read private evidence.
+12. Bulk responses report each item.
+
+Tests to add with the Planned items: P-01 (an expired suspension stops blocking at once even if the job has not run), P-02 (granting `moderator` to an unverified member is refused), P-03 (a rejected review can be reopened on day 29 and is purged after day 30 unless appealed).

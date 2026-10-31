@@ -2,6 +2,12 @@
 
 This log records build-time decisions without reopening the frozen Review specification.
 
+## 2026-10-31 (Hidden reviews and the rating)
+
+| Decision | Rule | Reason |
+|---|---|---|
+| Hidden reviews and the rating (owner) | A hidden review is removed from the rating by default (Review.md line 476 stands). A takedown opened with `counts_toward_rating: true` keeps the review's counted rating, for a genuine review hidden only for a privacy problem. Plain `HIDE` from the queue always removes it. Wiring the flag into the rating delta path is Moderation spec P-00. | The owner's 22 Oct draft wanted every hidden review counted. Counting abusive or fake ratings that nobody can see would distort the score. |
+
 ## 2026-10-28 (Unavailable features and bilingual fixes)
 
 | Decision | Rule | Reason |

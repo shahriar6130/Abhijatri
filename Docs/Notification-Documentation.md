@@ -1,545 +1,397 @@
-# Abhijatri Notification System
-## Architecture and API Specification — v1.1
+# Abhijatri Notification System: Architecture and API Specification
 
-**Stack:** Frontend + separate backend/API + Supabase PostgreSQL  
-**Channels in v1:** In-app notifications and email  
-**Implementation status (28 October 2026):** implemented in full, see section 15. API in `Docs/api/API.md` 5.21, tables in `Docs/Schema.md`, decisions in `Docs/Decisions.md`.
-**Policy decisions locked:** Current verified email; 90-day standard retention / 24-month critical retention; preserve notifications linked to open appeals; appeals for all policy-eligible decisions; event-based staff recipient resolution; daily digest.
+**Version:** 2.0 (31 October 2026). Restructures v1.1 into Frontend, Backend and Database parts and aligns it with the implemented system.
+**Status:** Implemented 28 October 2026, except the items marked **Planned** (section 16).
+**Channels:** in-app inbox and email. Push and SMS are future channels (section 17.2).
+**Base path:** every route below is under `/api/v1`.
+**Companion documents:** `Docs/Moderation-Dashboard-Specification.md` (the workflows that produce events), `Docs/api/API.md` 5.21 (wire contract), `Docs/Schema.md`, `Docs/Decisions.md`.
 
-
----
-
-## 1. Goals and guarantees
-
-The system must provide reliable, auditable notifications for member, moderator, and superadmin workflows while respecting role boundaries and protecting sensitive information.
-
-### Guarantees
-
-- **Durable business events:** a committed moderation action and its outbox event are written in the same database transaction.
-- **Exactly-once logical inbox creation:** idempotency constraints prevent duplicate logical in-app notifications for the same event, recipient, and notification kind.
-- **External delivery is at-least-once / best-effort:** email providers can time out after accepting a message. The system cannot promise exactly-once email delivery in every failure mode. Use provider idempotency keys where supported, record ambiguous outcomes, and reconcile them.
-- **In-app inbox is the source of truth:** realtime is a best-effort update signal; clients can refetch the inbox or poll.
-- **Authorization is checked server-side:** frontend visibility is not an authorization boundary.
-- **Auditable decisions:** notification delivery state does not replace the underlying moderation decision, audit record, appeal, or evidence.
-- **No sensitive payload leakage:** events and email templates contain only the minimum data needed. Do not put identity images, verification secrets, access tokens, or internal-only notes in notification payloads or logs.
-
-### Non-goals for v1
-
-- Push notifications and SMS (future channels).
-- Redis/BullMQ before measured volume or operational need justifies it.
-- A guarantee that an email reaches a recipient's inbox.
-- Using notifications as the authoritative record of a moderation decision.
+Where this document and `API.md` differ on a request or response shape, `API.md` and the OpenAPI snapshot win and this document is corrected.
 
 ---
 
-## 2. Channels and urgency
-
-### Channels
-
-1. **In-app:** durable notification row in PostgreSQL.
-2. **Email:** external delivery attempt tracked independently.
-3. **Future:** push/SMS adapters can be added without changing the business-event contract.
-
-Realtime may announce that the inbox changed, but it is not a separate durable notification channel.
-
-### Urgency versus delivery mode
-
-Keep these concepts separate:
-
-- `priority`: `critical`, `high`, `normal`, or `low`.
-- `delivery_mode`: `immediate` or `digest`.
-
-Critical notifications are never delayed into a digest. A user's preference may control standard email delivery mode, but cannot disable mandatory in-app notices or critical operational/security notifications.
-
----
-
-## 3. Event catalogue
-
-Events are produced by successful business actions, not by UI clicks alone. Use stable event names and versioned payload schemas.
-
-### Member-facing events
-
-- `verification.submitted`
-- `verification.clarification_requested`
-- `verification.approved`
-- `verification.rejected`
-- `verification.expired`
-- `content.published`
-- `content.hidden`
-- `content.rejected`
-- `content.taken_down`
-- `content.restored`
-- `account.suspended`
-- `account.suspension_lifted`
-- `account.removal_requested` (only if this workflow exists)
-- `account.removed`
-- `appeal.submitted`
-- `appeal.received`
-- `appeal.decided`
-- `security.account_action_required` (when applicable)
-
-Clarification requests must state what needs correction, provide an authenticated resubmission route, and avoid exposing moderator-only notes. Rejected signup-verification records must remain retrievable for 30 days under the moderation retention policy; that is separate from notification retention.
-
-### Moderator-facing events
-
-- `moderation.task_assigned`
-- `moderation.task_unassigned`
-- `moderation.task_lease_expiring`
-- `moderation.queue_overdue`
-- `moderation.escalated`
-- `moderation.appeal_assigned`
-- `moderation.security_anomaly`
-
-### Superadmin-facing events
-
-- `staff.role_granted`
-- `staff.role_revoked`
-- `moderation.emergency_takedown`
-- `moderation.escalation_required`
-- `notification.delivery_failure_threshold_reached`
-- `notification.outbox_backlog_threshold_reached`
-- `notification.provider_webhook_anomaly`
-
-Use a controlled event registry. New event types should be added through code/schema review rather than allowing arbitrary event names from clients.
-
----
-
-## 4. Architecture and processing flow
-
-1. An authenticated backend action validates authorization and business rules.
-2. In one short PostgreSQL transaction, the backend writes:
-   - the moderation/business state transition;
-   - the audit record;
-   - an outbox event with a stable deduplication key and schema version.
-3. An outbox worker claims pending events using a lease/claim mechanism.
-4. The event processor validates the schema and resolves recipients using the event's recipient policy.
-5. In a short transaction, it creates one logical inbox notification per recipient and any required external delivery records. Unique constraints make retries safe.
-6. The transaction commits.
-7. An email worker claims delivery work, commits the claim, and calls the provider **outside** the database transaction.
-8. The worker records the provider result and a delivery-attempt record.
-9. Realtime publishes an inbox-change signal. Clients still refetch the persisted inbox.
-10. Reconciliation jobs detect expired leases, stuck sends, ambiguous provider outcomes, retry exhaustion, and outbox backlog.
-
-Never hold a database transaction open while making an email-provider network call.
-
-### Outbox claim safety
-
-Workers must use atomic claiming (for example, `FOR UPDATE SKIP LOCKED` or an equivalent safe claim operation), a lease expiry, bounded retries, and a terminal/dead-letter state. A worker crash must not permanently strand an event.
-
-### Event ordering
-
-Include `aggregate_type`, `aggregate_id`, and `aggregate_version` where ordering matters. Notification rendering must use immutable event facts or a carefully selected snapshot rather than blindly reading current state and accidentally describing an old event as if it were current.
-
----
-
-## 5. Recipient resolution policy
-
-### Member recipients
-
-Resolve the intended member from the business event and store the recipient ID on the logical notification. Email address is not the member identity key.
-
-### Staff recipients — finalized: event-based
-
-- For assignment, unassignment, appeal assignment, role changes, and other person-specific events, capture explicit intended recipient IDs at event creation.
-- For role-based broadcasts, record the recipient-resolution policy and the relevant role/target context at event time; do not silently resolve all recipients only from whatever roles exist when a delayed worker runs.
-- Before revealing restricted case or staff information, re-check current authorization at delivery/render time.
-- A role-revocation event must still reach the affected person, even though their staff permissions have been revoked.
-- Revoked staff must not retain access to restricted case details through old notification links or realtime subscriptions.
-
----
-
-## 6. Final notification policy
-
-### 6.1 Email address — current verified address
-
-Resolve the member's **current verified email address at send time**. Never send to a newly changed but unverified address. If there is no verified address, retain the in-app notification and mark email as skipped/blocked with a reason. Do not store email addresses in event payloads unless a narrowly justified, audited workflow requires a snapshot.
-
-### 6.2 Retention — preserve
-
-- Standard notifications: 90 days.
-- Critical account-decision notifications: 24 months.
-- Notifications linked to an open appeal: preserve until the appeal is closed and the applicable retention policy is satisfied.
-- Audit history, delivery attempts, and moderation evidence have separate retention policies; deleting an inbox item must not delete the underlying decision history.
-- Use per-row `expires_at` and a cleanup job for v1. Do not introduce time partitioning until volume and retention requirements justify it.
-
-### 6.3 Appeals — always for policy-eligible decisions
-
-Every decision that policy marks appealable must include an appeal route, case/decision reference, and applicable deadline. Send receipt and decision notifications. Preserve the original decision and appeal history. Where practical, assign an independent reviewer. “Always” does not make every action indefinitely appealable; eligibility and deadlines remain explicit policy rules.
-
-### 6.4 Staff recipients — event-based
-
-Use the event-based recipient rules in Section 5. Current authorization must still be checked before disclosing restricted content.
-
-### 6.5 Digest — daily
-
-- Daily digest at a configurable recipient-local time and timezone.
-- Only eligible non-critical notifications may be batched.
-- Critical, security-sensitive, and time-sensitive notifications are sent immediately.
-- Store digest membership so retrying a digest job does not duplicate its logical summary.
-- Digest delivery must link to authenticated, allowlisted application routes.
-
----
-
-## 7. Data model
-
-Names below are proposed logical tables. Inspect the current schema before creating migrations; reuse or migrate existing tables rather than blindly duplicating them.
-
-### 7.1 `notification_outbox`
-
-Suggested fields:
-
-- `id UUID PRIMARY KEY`
-- `dedupe_key TEXT NOT NULL UNIQUE`
-- `event_type TEXT NOT NULL`
-- `schema_version INTEGER NOT NULL`
-- `aggregate_type TEXT NULL`
-- `aggregate_id UUID/TEXT NULL`
-- `aggregate_version BIGINT NULL`
-- `payload JSONB NOT NULL` (minimal, schema-validated, no sensitive documents/secrets)
-- `recipient_policy JSONB NOT NULL` (controlled policy identifier/context, not executable code)
-- `created_at TIMESTAMPTZ NOT NULL`
-- `occurred_at TIMESTAMPTZ NOT NULL`
-- `status TEXT NOT NULL` (`pending`, `processing`, `processed`, `retry`, `dead_letter`)
-- `attempt_count INTEGER NOT NULL DEFAULT 0`
-- `next_attempt_at TIMESTAMPTZ NULL`
-- `lease_owner TEXT NULL`
-- `lease_expires_at TIMESTAMPTZ NULL`
-- `last_error_code TEXT NULL`
-- `processed_at TIMESTAMPTZ NULL`
-
-Keep processed outbox rows for 30 days by default, unless incident investigation or audit policy requires longer.
-
-### 7.2 `notifications`
-
-One durable in-app item per recipient and logical notification kind.
-
-- `id UUID PRIMARY KEY`
-- `event_id UUID NOT NULL REFERENCES notification_outbox(id)`
-- `recipient_id UUID NOT NULL`
-- `notification_kind TEXT NOT NULL` (stable logical identifier)
-- `type TEXT NOT NULL`
-- `priority TEXT NOT NULL`
-- `template_key TEXT NOT NULL`
-- `template_version INTEGER NOT NULL`
-- `locale TEXT NOT NULL`
-- `title TEXT NOT NULL`
-- `body TEXT NOT NULL`
-- `action_route TEXT NULL` (allowlisted internal route, not arbitrary URL)
-- `created_at TIMESTAMPTZ NOT NULL`
-- `read_at TIMESTAMPTZ NULL`
-- `archived_at TIMESTAMPTZ NULL`
-- `expires_at TIMESTAMPTZ NULL`
-- `appeal_id UUID/TEXT NULL` (if applicable)
-
-Constraint: `UNIQUE (event_id, recipient_id, notification_kind)`. Do **not** include `created_at` in this idempotency key. Use a normal table with a simple UUID primary key in v1; defer partitioning.
-
-### 7.3 `notification_deliveries`
-
-Tracks one external-channel delivery for a logical notification.
-
-- `id UUID PRIMARY KEY`
-- `notification_id UUID NOT NULL REFERENCES notifications(id)`
-- `channel TEXT NOT NULL` (`email` in v1)
-- `destination_ref TEXT NULL` (avoid storing raw destination where possible; use controlled reference or protected field)
-- `status TEXT NOT NULL` (`queued`, `sending`, `accepted`, `delivered`, `bounced`, `failed_permanently`, `skipped`, `ambiguous`)
-- `attempt_count INTEGER NOT NULL DEFAULT 0`
-- `next_attempt_at TIMESTAMPTZ NULL`
-- `provider_message_id TEXT NULL`
-- `last_error_code TEXT NULL`
-- `last_error_summary TEXT NULL` (redacted)
-- `created_at TIMESTAMPTZ NOT NULL`
-- `updated_at TIMESTAMPTZ NOT NULL`
-
-Constraint: `UNIQUE (notification_id, channel)` unless the product explicitly supports multiple distinct destinations for the same channel.
-
-“Accepted” means accepted by the provider, not guaranteed inbox delivery.
-
-### 7.4 `notification_delivery_attempts`
-
-Append-only attempt history; do not rely only on the latest error fields.
-
-- `id UUID PRIMARY KEY`
-- `delivery_id UUID NOT NULL REFERENCES notification_deliveries(id)`
-- `attempt_number INTEGER NOT NULL`
-- `started_at TIMESTAMPTZ NOT NULL`
-- `finished_at TIMESTAMPTZ NULL`
-- `outcome TEXT NOT NULL` (`accepted`, `transient_failure`, `permanent_failure`, `ambiguous`, `skipped`)
-- `provider_message_id TEXT NULL`
-- `error_class TEXT NULL`
-- `error_code TEXT NULL`
-- `redacted_error_summary TEXT NULL`
-
-Constraint: `UNIQUE (delivery_id, attempt_number)`. Never log provider credentials, full message bodies, verification secrets, or identity-document URLs.
-
-### 7.5 `notification_provider_events`
-
-Deduplicates provider callbacks/webhooks.
-
-- `id UUID PRIMARY KEY`
-- `provider TEXT NOT NULL`
-- `provider_event_id TEXT NOT NULL`
-- `event_type TEXT NOT NULL`
-- `delivery_id UUID NULL REFERENCES notification_deliveries(id)`
-- `received_at TIMESTAMPTZ NOT NULL`
-- `processed_at TIMESTAMPTZ NULL`
-- `redacted_payload JSONB NULL`
-
-Constraint: `UNIQUE (provider, provider_event_id)`.
-
-### 7.6 `notification_templates`
-
-Versioned template records:
-
-- `id UUID PRIMARY KEY`
-- `template_key TEXT NOT NULL`
-- `channel TEXT NOT NULL`
-- `locale TEXT NOT NULL`
-- `version INTEGER NOT NULL`
-- `subject_template TEXT NULL`
-- `title_template TEXT NULL`
-- `body_template TEXT NOT NULL`
-- `variable_schema JSONB NOT NULL`
-- `status TEXT NOT NULL` (`draft`, `active`, `retired`)
-- `created_by UUID NOT NULL`
-- `created_at TIMESTAMPTZ NOT NULL`
-- `activated_at TIMESTAMPTZ NULL`
-
-Constraint: `UNIQUE (template_key, channel, locale, version)`. Published versions are immutable; edits create a new version. Enforce at most one active version per key/channel/locale. Validate variables against an allowlisted schema.
-
-### 7.7 `notification_rules`
-
-Stores controlled configuration for event-to-template/channel/priority behavior. Use allowlisted resolver identifiers and validated rule fields, not arbitrary executable logic stored in the database. Business code must still validate and emit supported events.
-
-### 7.8 `notification_preferences`
-
-- `recipient_id UUID PRIMARY KEY`
-- `standard_email_mode TEXT NOT NULL` (`immediate`, `digest`, `off`, subject to policy)
-- `digest_timezone TEXT NOT NULL`
-- `digest_local_time TIME NOT NULL`
-- `updated_at TIMESTAMPTZ NOT NULL`
-
-Critical in-app notices and mandatory security/account notifications cannot be disabled by a standard preference. Avoid mixing priority with delivery mode.
-
-### 7.9 `notification_suppressions`
-
-- `id UUID PRIMARY KEY`
-- `destination_hmac TEXT NOT NULL`
-- `channel TEXT NOT NULL`
-- `reason_code TEXT NOT NULL`
-- `created_by UUID NULL`
-- `created_at TIMESTAMPTZ NOT NULL`
-- `removed_by UUID NULL`
-- `removed_at TIMESTAMPTZ NULL`
-- `removal_reason TEXT NULL`
-
-Use an HMAC of a normalized destination rather than a plain hash, because email addresses are guessable. Restrict access. Adding/removing suppressions requires audit entries and a reason.
-
-### 7.10 `notification_digests`
-
-- `id UUID PRIMARY KEY`
-- `recipient_id UUID NOT NULL`
-- `scheduled_for TIMESTAMPTZ NOT NULL`
-- `status TEXT NOT NULL` (`queued`, `sending`, `accepted`, `failed`, `ambiguous`)
-- `notification_ids UUID[] NOT NULL` or a join table if queryability is required
-- `delivery_id UUID NULL REFERENCES notification_deliveries(id)`
-- `created_at TIMESTAMPTZ NOT NULL`
-
-Add a unique key for recipient + digest window to prevent duplicate logical digests.
-
----
-
-## 8. Idempotency, retries, and failure handling
-
-### Retry schedule
-
-Use bounded exponential/backoff scheduling aligned to the initial policy: immediate attempt, then approximately 1 minute, 5 minutes, 30 minutes, and 2 hours. Apply jitter where appropriate. After the configured maximum, mark the delivery permanently failed and alert operators through a deduplicated operational alert path.
-
-- Hard bounce / invalid destination: permanent failure or suppression according to provider classification.
-- Temporary provider error: retry.
-- Timeout after request submission: `ambiguous` unless provider status or idempotency support resolves the outcome.
-- A provider webhook is authenticated, replay-protected, and deduplicated.
-- Do not retry forever.
-- Do not generate an unbounded notification loop when a failure notification itself fails. Use deduplicated alerts and independent monitoring.
-
-### Crash cases to test
-
-- Business transaction rolls back: no outbox event exists.
-- Business transaction commits but worker is down: outbox eventually processes.
-- Two workers claim work concurrently: one logical notification per uniqueness key.
-- Worker crashes after provider accepts email but before recording success: state becomes ambiguous/reconciled; do not falsely claim exactly-once email.
-- Provider webhook is delivered twice: one provider event is processed.
-- A delivery lease expires: another worker can recover it safely.
-- Email address changed before send: current verified address is used.
-- Recipient loses a role while a job is delayed: no unauthorized case details are disclosed.
-- Appeal opens before expiry cleanup: linked notifications are preserved.
-- Realtime disconnects: inbox recovers through refetch/polling.
-
----
-
-## 9. API specification
-
-All application endpoints require authenticated server-side authorization, except provider webhooks, which use provider signature authentication and replay protection.
-
-### Member inbox
-
-- `GET /api/notifications?cursor=...&limit=...`
-- `GET /api/notifications/unread-count`
-- `PATCH /api/notifications/{notificationId}` — mark read/archive only; validate ownership.
-- `POST /api/notifications/mark-all-read` — scoped to the authenticated user.
-- `GET /api/notification-preferences`
-- `PUT /api/notification-preferences` — validate supported modes and timezone.
-
-Clients must not be allowed to insert arbitrary notifications or change recipient IDs, priority, delivery status, or expiry.
-
-### Admin delivery monitoring — superadmin only
-
-- `GET /api/admin/notification-deliveries`
-- `GET /api/admin/notification-deliveries/{deliveryId}`
-- `GET /api/admin/notification-outbox?status=...`
-- `POST /api/admin/notification-deliveries/{deliveryId}/retry` — only for retryable states, with an audit record.
-- `POST /api/admin/notification-suppressions`
-- `DELETE /api/admin/notification-suppressions/{suppressionId}` — require removal reason and audit actor.
-
-Redact destinations and message details from general monitoring views. Limit access to full provider diagnostics.
-
-### Template management — superadmin only
-
-- `POST /api/admin/notification-templates/{key}/versions` — create a new draft version with channel, locale, and validated variable schema.
-- `POST /api/admin/notification-templates/{key}/versions/{version}/activate`
-- `GET /api/admin/notification-templates/{key}/versions`
-
-Do not use a single ambiguous `PUT /templates/{key}` endpoint for versions that differ by channel and locale. Activation is a separate audited operation.
-
-### Provider webhook
-
-- `POST /api/webhooks/notifications/{provider}`
-
-Verify provider signature, timestamp/replay window, expected content type, and provider event ID. Deduplicate with `(provider, provider_event_id)`. Do not require a normal member session token for provider callbacks.
-
----
-
-## 10. Security and Supabase controls
-
-- PostgreSQL is the source of truth.
-- Apply both SQL grants and Row Level Security; RLS does not replace grants.
-- Members can read only their own notification rows and update only permitted fields on their own rows.
-- No client-side inserts into notifications, outbox, deliveries, attempts, provider events, templates, rules, or suppressions.
-- Service-role/secret keys must never be shipped to the browser.
-- Use the backend API for privileged writes and policy validation.
-- Realtime is best-effort. Subscribe only to appropriately scoped records; avoid exposing sensitive staff data in shared channels.
-- Authorization must be rechecked for sensitive action links and restricted case details.
-- Use fixed application origins and allowlisted internal action routes; never build action URLs from untrusted user-supplied URLs.
-- Rate-limit user-triggered messages. Keep mandatory system processing on a separate controlled path so user preferences or abuse limits do not silently suppress critical events.
-- Logs must be redacted and access-controlled.
-
----
-
-## 11. Jobs and operational monitoring
-
-Suggested jobs:
-
-- Outbox poll/claim worker: short polling interval, configurable.
-- Delivery retry worker: frequent bounded scan of due retries.
-- Lease reconciliation: recover expired worker claims.
-- Ambiguous-send reconciliation: query provider status where supported; otherwise surface for controlled review.
-- Overdue moderation/task scan.
-- Daily digest scheduler and sender.
-- Notification expiry cleanup respecting appeal preservation.
-- Processed outbox cleanup after the configured retention window.
-- Delivery/provider webhook reconciliation.
-- Health checks and backlog alerts.
-
-Metrics:
-
-- Outbox pending count and oldest event age.
-- Event-to-inbox latency.
-- Email acceptance/failure/bounce rates.
-- Retry count and ambiguous delivery count.
-- Dead-letter count and age.
-- Webhook signature failures and duplicate callback rate.
-- Digest build/send failures.
-- Notification cleanup failures.
-
-Alerting must be deduplicated. A notification subsystem must not rely exclusively on itself to report its own total failure.
-
----
-
-## 12. UI requirements
-
-- Notification bell with unread count.
-- Paginated inbox with read/unread state, category, and timestamp.
-- Clear action label and authenticated route.
-- Preferences for standard email immediate/daily digest/off where policy permits.
-- Daily digest summary.
-- Superadmin-only monitoring for outbox, deliveries, retries, suppression and provider status.
-- Empty, loading, error, retry, and stale/reconnect states.
-- Sensitive details remain behind authenticated role-checked pages; email/inbox previews contain minimal content.
-
----
-
-## 13. Implementation phases
-
-### Phase 0 — inspect and reconcile
-
-Inspect current Supabase schema, RLS policies, backend authentication, moderation audit/event structure, current email provider, and existing notification tables. Produce a migration plan; do not create duplicate tables blindly.
-
-### Phase 1 — durable event and inbox core
-
-Implement the outbox, versioned event contracts, recipient policy, idempotent inbox creation, owner-only access, and realtime/refetch behavior. Test duplicate and concurrent event processing.
-
-### Phase 2 — email delivery
-
-Add delivery rows, attempt history, provider adapter, bounded retries, verified-current-address resolution, signed webhooks, webhook dedupe, and ambiguous-outcome handling. Test provider timeout and worker crash scenarios.
-
-### Phase 3 — catalogue and preferences
-
-Add the moderation event catalogue, versioned templates, member/moderator/superadmin notifications, appeal notices, preferences, and daily digest.
-
-### Phase 4 — operations
-
-Add superadmin monitoring, dead-letter/reconciliation workflows, backlog alerts, redacted diagnostics, and incident procedures.
-
-### Phase 5 — retention and load validation
-
-Enforce expiry policy, open-appeal preservation, 30-day processed-outbox cleanup, load tests, and authorization tests. Add Redis/BullMQ or partitioning only if measurements justify the added complexity.
-
----
-
-## 14. Acceptance checklist
-
-Evidence is the automated test (backend: `backend/tests/`, run on PostgreSQL) or the file that implements it.
-
-- [x] Business state, audit row, and outbox event commit atomically. — `app/notify/events.py::emit` runs in the business transaction; `test_notifications.py::test_a_rolled_back_decision_leaves_no_event`, `test_admin.py::test_a_decision_writes_action_audit_and_outbox_together`, `test_a_stale_version_is_a_conflict_and_changes_nothing`.
-- [x] Duplicate/replayed events create one logical inbox notification per recipient/kind. — `uq_notifications_identity`, `dedupe_key`; `test_two_workers_create_one_notification`, `test_events_wait_for_a_stopped_worker_and_are_deduplicated`, `test_cases.py::test_events_become_notifications_once_and_critical_ones_are_emailed`.
-- [x] Email delivery is described honestly as at-least-once/best-effort, with ambiguous outcomes tracked. — `app/notify/delivery.py`; `test_a_crash_after_the_provider_call_is_recorded_as_ambiguous`, `test_cases.py::test_an_unclear_send_is_ambiguous_and_a_failure_is_retried`.
-- [x] Each email attempt has a history row. — `notification_delivery_attempts`; `test_retries_follow_the_schedule_then_fail_permanently`.
-- [x] Provider webhook signatures and duplicate events are handled. — `app/notify/webhooks.py`; `test_resend_webhooks_are_verified_and_deduplicated`, `test_brevo_webhooks_need_the_token`.
-- [x] Current verified email is used at send time. — `test_the_current_verified_address_is_used_at_send_time`.
-- [x] Daily digest never delays critical events and is idempotent. — `delivery.build_digests` (unique recipient + local day); `test_the_digest_is_sent_once_at_the_local_time`, `test_preferences_choose_standard_email_but_never_delay_critical`.
-- [x] Standard/critical expiry rules are applied per row. — `notifications.expires_at`; `test_events_wait_for_a_stopped_worker_and_are_deduplicated` (90 days), `test_two_workers_create_one_notification` (24 months), `test_cases.py::test_old_notifications_are_purged_by_class`.
-- [x] Notifications linked to open appeals are preserved. — `retention.purge_notifications`; `test_expired_notifications_linked_to_an_open_appeal_are_kept`.
-- [x] Every policy-eligible decision offers an appeal route and deadline. — appealable notices link to `/account/appeals` and say "appeal within 30 days"; the receipt carries the reference and deadline (`registry.py`); `test_template_versions_are_validated_activated_and_audited`, `test_cases.py::test_appeal_received_independent_review_and_overturn`.
-- [x] Role changes do not leak restricted information to revoked staff. — staff notices re-checked at creation and hidden from people without a role; `test_a_revoked_moderator_is_told_but_loses_staff_notices`, `test_staff_captured_at_event_time_are_rechecked_before_delivery`.
-- [x] RLS and SQL grants are tested for every role. — `test_rls.py::test_every_public_table_has_row_level_security` (RLS on every table, no grants to `anon`/`authenticated`); members reach only their own rows through the API (`test_inbox_pages_marks_read_archives_and_counts`); superadmin-only routes refuse moderators (`test_superadmins_retry_only_retryable_deliveries_and_it_is_audited`).
-- [x] Realtime outage does not lose notifications. — the inbox is persisted first; the bell refetches after a reconnect and shows a "reconnecting" state (`frontend/src/components/layout/NotificationBell.tsx`); the staff inbox polls every 30 s.
-- [x] Admin retries, template activation, and suppression changes are audited. — `test_superadmins_retry_only_retryable_deliveries_and_it_is_audited`, `test_template_versions_are_validated_activated_and_audited`, `test_suppressed_addresses_are_skipped_and_suppressions_are_audited`, `test_a_rule_can_turn_email_off_but_not_invent_recipients`.
-- [x] Failure alerts are deduplicated and independent monitoring exists. — `app/notify/alerts.py` (one alert per window, also logged at ERROR); the ops dashboard's Notifications panel (`app/ops/providers/notifications.py`) reads the tables directly; `test_scanners_alert_once_per_window`, `test_repeated_denials_alert_superadmins`.
-- [x] No sensitive documents, secrets, or unredacted message bodies appear in logs. — `test_logs_never_contain_addresses_or_bodies`, `test_log_redaction.py`; webhooks keep a redacted payload only.
-
----
-
-## 15. Implementation notes (28 October 2026)
-
-| Spec item | Where | Note |
+## 1. Purpose and guarantees
+
+The notification system tells members, moderators and superadmins about decisions and work that concern them, reliably and without leaking anything they are not entitled to see.
+
+| Guarantee | How it is met |
+|---|---|
+| No decision without its event | The business change, its audit row and its outbox event commit in one transaction. A rolled-back decision leaves no event. |
+| No duplicate inbox items | One notification per `(event, recipient, kind)`, enforced by a unique index. Retries and parallel workers are safe. |
+| Honest email delivery | Email is at-least-once and best effort. A timeout is recorded as `ambiguous` and never resent automatically. No exactly-once claim. |
+| The inbox is the truth | Live updates (Server-Sent Events) only signal; the page refetches after any reconnect. |
+| No leaks | Payloads and templates carry only allowlisted variables. No ID images, tokens, internal notes or email addresses in payloads, logs or API responses. |
+| Role boundaries | Staff notices are shown only while the person still holds a staff role. A revoked moderator is told about the revocation but loses earlier staff notices. |
+| Notifications are not the record | The decision, audit event and appeal remain authoritative; deleting a notification deletes nothing else. |
+
+## 2. Review of the owner's requirements
+
+| Requirement (owner draft, 22 Oct) | Verdict | Resolution |
 |---|---|---|
-| 7.1 `notification_outbox` | `outbox_events` (migration `0017`) | The existing shared outbox was extended rather than duplicated (section 7 asks to reuse): `topic` = `event_type`, `available_at` = `next_attempt_at`, `lease_until` = `lease_expires_at`. |
-| 7.2 `notifications` | `notifications` | Bangla and English are stored side by side (the UI is bilingual) instead of one `locale` column; `audience` hides staff notices from people who lost the role. |
-| 7.3 to 7.10 | new tables in `0017` | As specified. Digest membership is `notifications.digest_id` (the spec allows a join instead of an array). |
-| 3 Event catalogue | `app/notify/registry.py` | Every listed event has a rule. `verification.expired` and `account.removal_requested` have no workflow in v1 and are never emitted. Extra kinds kept from earlier work: `content.removed`, `account.case_opened`, `account.warning`, `account.restricted`, `account.restriction_lifted`, `report.actioned`, `report.dismissed`, `staff.verification_submitted`, `staff.role_changed`. |
-| 5 Recipients | `app/notify/messages.py` | Allowlisted resolvers only: a person named in the event, or staff captured at event time and re-checked for their current role. |
-| 7.6 Templates | `notification_templates` | Version 1 of every text ships in code and is stored at start-up; superadmins add and activate later versions. Only the variables of that template are allowed. |
-| 7.7 Rules | `notification_rules` | Live tuning only (priority, email on/off, enabled); events, recipients and routes cannot be added from the database. |
-| 8 Retries | `app/notify/delivery.py` | 1 min, 5 min, 30 min, 2 h with ±10 % jitter, then `failed_permanently`; 4xx (except 429) is permanent at once. |
-| 9 API | `app/member_routes.py`, `app/notify/admin_routes.py`, `app/notify/webhooks.py` | Paths are under `/api/v1`; preferences at `/notification-preferences`. |
-| 10 Supabase | migrations | The browser never talks to Supabase: RLS is on and `anon`/`authenticated` have no grants on any table, which is stricter than "members read their own rows". |
-| 12 UI | public `/account/notifications` and the bell; staff Inbox and Notifications tabs | |
+| A proper notification system for every moderation outcome | **Keep** | Every workflow emits a catalogued event (section 6). |
+| Moderator emails the member for clarification (unclear ID image, ambiguous details) | **Corrected** | Moderators do not send email from their own accounts. They set the case to `needs_clarification` with a question; the system sends a templated notice with a link to `/account/verification`. The question is the only free text, and it is recorded. No document is attached to any email. |
+| Members are told in detail about suspension, removal and verification results | **Keep** | Each notice states what happened and, where appealable, says "appeal within 30 days" and links to `/account/appeals`. Detail stays behind sign-in; emails stay short. |
+| Notify on appeal | **Keep** | Receipt (with reference and deadline) and decision notices to the member; a queue notice to staff. |
+| Monitoring of moderators and failures | **Keep** | Alerts for queue overdue, lease expiry, escalations, repeated denials, delivery failures, outbox backlog and webhook anomalies, plus the independent ops dashboard panel. |
+| Fast, reliable delivery for a good user experience | **Keep** | The request returns as soon as the decision commits. The worker turns events into notifications within seconds and sends critical email at once. |
+
+## 3. Architecture
+
+```
+ business request (moderation, verification, appeal, role change, sanction)
+        |  one transaction
+        v
+ state change + audit_events row + outbox_events row (dedupe_key, recipient policy)
+        |
+        v  notification worker (claims with FOR UPDATE SKIP LOCKED, lease, every 2 s)
+ rules (registry.py) -> resolve recipients -> render template (bn + en)
+        |  one short transaction
+        v
+ notifications (inbox)  +  notification_deliveries (email, if due now)
+        |                                   |
+        v                                   v  no transaction open during the call
+ GET /notifications, SSE stream        email provider (Brevo / Resend / SMTP / Gmail)
+        |                                   |
+ bell, inbox page, staff inbox         attempt row; provider webhook -> delivered / bounced
+```
+
+### 3.1 Database choice
+
+**Recommendation: Supabase Postgres is the only store for notifications. Use Upstash Redis later only as a fan-out signal for live updates. Do not use Cassandra or MongoDB.**
+
+| Store | Role | Reason |
+|---|---|---|
+| **Supabase Postgres** | Outbox, inbox, deliveries, attempts, templates, rules, preferences, suppressions, digests. | The event must commit with the decision that caused it, and inbox creation must be idempotent across retries. Both need transactions and unique constraints in the same database as the moderation tables. |
+| **Upstash Redis** | Not used by notifications today. Planned use: pub/sub to wake live streams (P-N2). | Live signals are disposable, so a fast cache suits them. Losing Redis must only delay the bell, never lose a notification. |
+| Cassandra | Not used. | Suits huge append-only write volumes; Abhijatri's inbox volume is small and needs joins and transactions. |
+| MongoDB | Not used. | Would split the outbox from the decisions and break the one-transaction guarantee. |
+
+A queue product such as BullMQ or SQS is not needed while the Postgres outbox keeps up. The trigger to add one is the outbox backlog alert (older than 10 minutes) firing under normal load.
+
+## 4. Roles and what each receives
+
+| Recipient | Receives | Where |
+|---|---|---|
+| Member | Outcomes of their reviews, reports, verification, appeals, account actions, security notices | Public app bell and `/account/notifications`; email |
+| Moderator | Assignments, lease expiry, escalation result, new verification requests and appeals in the queue, queue overdue | Staff dashboard Inbox; email for high priority |
+| Superadmin | Everything a moderator gets, plus escalations needing a decision, emergency takedowns, role changes, security anomalies and notification-system alerts | Staff dashboard Inbox; email |
+
+Staff are members, so every staff member also gets member notices about their own content and account.
+
+## 5. Priority and delivery mode
+
+These are separate. Priority says how urgent; delivery mode says how email is sent.
+
+| Priority | Email | Can the person turn email off? |
+|---|---|---|
+| `critical` | Immediately | No |
+| `high` | Immediately | No |
+| `normal` | By preference: `immediate`, `digest` (default, daily at local time, default 08:00 Asia/Dhaka) or `off` | Yes |
+| `low` | By preference | Yes |
+
+The in-app notice is always created, whatever the email preference. A rule may be set to `email: false` (for example the lease warning, which is useful only on screen).
+
+## 6. Event catalogue
+
+Events come from successful business actions only. The catalogue is code (`app/notify/registry.py`); superadmins can tune priority, email and enabled per rule but cannot add events, recipients or links from the database.
+
+### 6.1 Member notices
+
+| Event | Notice kind | Priority | Link |
+|---|---|---|---|
+| `review.state_changed` (PUBLISH) | `content.published` | normal | destination page |
+| `review.state_changed` (REQUEST_CHANGES) | `content.changes_requested` | high | `/account` |
+| `review.state_changed` (REJECT) | `content.rejected` | critical | `/account/appeals` |
+| `review.state_changed` (HIDE) | `content.hidden` | critical | `/account/appeals` |
+| `review.state_changed` (RESTORE) | `content.restored` | normal | destination page |
+| `enforcement.opened` (takedown) | `content.taken_down` | critical | `/account/appeals` |
+| `enforcement.opened` (account) | `account.case_opened` | critical | `/account/appeals` |
+| `enforcement.state_changed` | `content.restored`, `content.removed`, `account.removed` | normal / critical | `/account/appeals` |
+| `sanction.created` | `account.warning`, `account.restricted`, `account.suspended` | critical | `/account/appeals` |
+| `sanction.ended` | `account.restriction_lifted`, `account.suspension_lifted` | critical | none |
+| `verification.submitted` | `verification.submitted` | normal | `/account/verification` |
+| `verification.state_changed` | `verification.clarification_requested` (with `{question}`), `verification.approved`, `verification.rejected` | high / critical | `/account/verification`, `/account/appeals` |
+| `appeal.received` | `appeal.received` (with `{reference}`, `{deadline}`) | critical | `/account/appeals` |
+| `appeal.decided` | `appeal.decided` (with `{reference}`, `{outcome}`) | critical | `/account/appeals` |
+| `report.state_changed` | `report.actioned`, `report.dismissed` | normal | none |
+| `security.password_changed` | `security.account_action_required` | critical | `/account/notifications` |
+| `security.mfa_reset` | `security.mfa_reset` | critical | staff dashboard |
+| `staff.role_changed` | `staff.role_granted` (with `{role}`), `staff.role_revoked` | critical | staff dashboard / none |
+
+### 6.2 Staff notices
+
+| Event | Notice kind | Recipients | Priority |
+|---|---|---|---|
+| `verification.submitted` | `staff.verification_submitted` | staff captured at event time | normal |
+| `appeal.received` | `appeal.submitted` | staff captured at event time | normal |
+| `task.assigned` | `moderation.task_assigned`, `moderation.appeal_assigned`; `moderation.task_unassigned` to the previous assignee | the named person | high / normal |
+| `task.lease_expiring` | `moderation.task_lease_expiring` (no email) | the lease holder | high |
+| `task.escalated` | `moderation.escalated` (no email) to the holder; `moderation.escalation_required` to superadmins | holder; superadmins | normal / high |
+| `moderation.queue_overdue` | `moderation.queue_overdue` (`{count}` tasks older than 24 h, daily) | moderators | normal |
+| `enforcement.opened` (emergency) | `moderation.emergency_takedown` | superadmins | critical |
+| `moderation.security_anomaly` | `moderation.security_anomaly` (`{count}` denials) | superadmins | high |
+| `staff.role_changed` | `staff.role_changed` | superadmins | normal |
+| `notification.delivery_failure_threshold_reached` | same | superadmins | high |
+| `notification.outbox_backlog_threshold_reached` | same | superadmins | high |
+| `notification.provider_webhook_anomaly` | same | superadmins | high |
+
+`verification.expired` and `account.removal_requested` are catalogued but have no workflow in v1 and are never emitted.
+
+---
+
+# Part A: Frontend
+
+## 7. Public app
+
+| Element | File | Behaviour |
+|---|---|---|
+| Bell | `frontend/src/components/layout/NotificationBell.tsx` | Unread count, latest items, link to the inbox. Opens an `EventSource` on `/notifications/stream`; on reconnect it refetches the inbox and shows "Live updates paused; reconnecting" while down. |
+| Inbox page | `/account/notifications` (`NotificationsPage.tsx`) | Paginated (cursor), unread filter, archived view, mark read, archive, mark all read. Each item shows category, time and an action link from the allowlisted route list. |
+| Preferences | same page | Standard email `immediate`, `digest` or `off`; time zone; local digest time. Shows that critical and high-priority email cannot be turned off. |
+| API client | `frontend/src/api/account.ts` | Cookie session, CSRF header on writes, no Supabase key. |
+
+Text is stored in Bangla and English side by side; the page shows the user's language. Detail stays on authenticated pages (verification, appeals); notifications carry a short summary and a link.
+
+## 8. Staff dashboard
+
+| Tab | Who | Behaviour |
+|---|---|---|
+| Inbox | staff | Same `GET /notifications` feed (staff and member items), polled every 30 s. |
+| Notifications | superadmin | Deliveries with status counts and attempt history; outbox by status with oldest pending age; suppressions (HMAC prefix only, add with reason, remove with reason); templates (versions per channel and language, create draft, activate); rules (priority, email, enabled). |
+
+Links with the `staff:/` prefix open the staff dashboard; all others open the public app. The frontend never builds a link from user input.
+
+## 9. States every view handles
+
+Loading, empty, error with retry, offline, stale after reconnect (refetch), and for superadmin views, forbidden (`403`) if the role was revoked during the session.
+
+---
+
+# Part B: Backend
+
+## 10. Module map
+
+| Module | Responsibility |
+|---|---|
+| `app/notify/events.py` | `emit()`: writes the outbox row inside the caller's transaction, captures staff recipients, sets `dedupe_key`. |
+| `app/notify/registry.py` | Catalogue: templates (code-defined version 1), rules (event → kind, resolver, priority, audience, route, conditions), allowed variables and routes. Self-checks at import. |
+| `app/notify/messages.py` | Recipient resolvers (`payload_user`, `captured_staff`) and rendering. |
+| `app/notify/worker.py` | Outbox relay loop (every 2 s), defaults sync, scanners (every 60 s). |
+| `app/notify/delivery.py` | Email sending, retries, ambiguous handling, digests. |
+| `app/notify/providers.py` | Provider adapters: `mailpit`, `resend`, `brevo`, `smtp`, `gmail`, `none`, and a recording provider for tests. Selected by `EMAIL_PROVIDER`. |
+| `app/notify/webhooks.py` | Signed provider callbacks, deduplication, bounce and complaint suppression. |
+| `app/notify/alerts.py` | Deduplicated operational alerts (also logged at ERROR). |
+| `app/notify/admin_routes.py` | Superadmin monitoring, suppressions, templates, rules. |
+| `app/member_routes.py` | Inbox, preferences, SSE stream. |
+| `app/jobs/retention.py` | Expiry of notifications and processed outbox rows. |
+
+## 11. Processing pipeline
+
+1. **Emit.** A producer calls `events.emit()` inside its business transaction. The row holds `topic` (event type), `aggregate_type`/`id`/`version`, `dedupe_key` (unique), a minimal schema-checked payload, the `recipient_policy` and any captured staff ids.
+2. **Claim.** The worker selects due events (`pending`, `retry`, or `processing` with an expired lease) with `FOR UPDATE SKIP LOCKED`, records itself as lease owner, and commits.
+3. **Process** each event in one short transaction: match rules, resolve recipients, render the active template version, insert notifications with `ON CONFLICT DO NOTHING`, decide each one's email mode, queue immediate deliveries, mark the event `processed`.
+4. **Fail safely.** An error moves the event to `retry` with backoff; after 6 tries it becomes `dead_letter`, visible to superadmins and the ops dashboard.
+5. **Send email** in `delivery.send_due` with **no transaction open** during the provider call; record an attempt row and the result.
+6. **Signal.** Open SSE streams pick up new rows; clients refetch on reconnect.
+7. **Scan** every 60 s: build due digests and raise alerts.
+
+### 11.1 Recipient resolution
+
+- `payload_user`: the person named in the event (author, applicant, appellant, reporter, assignee, target of a role change).
+- `captured_staff`: staff ids captured **when the event happened**, re-checked against their **current** role when the notice is created. Someone who lost the role, or no longer holds the required role (`role=superadmin` rules), gets nothing.
+- A role-revocation notice is a member notice, so it still reaches the person who lost the role.
+- Email addresses are never recipient identity. The current verified address is read at send time. An unverified or suppressed address makes the delivery `skipped` with a reason; the inbox item stays.
+
+### 11.2 Email delivery and retries
+
+| Situation | Result |
+|---|---|
+| Provider accepted | `accepted`; a webhook may later mark `delivered` or `bounced` |
+| Temporary error or 429 | Retry after about 1 min, 5 min, 30 min, 2 h (±10 % jitter), then `failed_permanently` |
+| 4xx other than 429 | `failed_permanently` at once |
+| Timeout after sending, or worker died mid-send | `ambiguous`; never resent automatically; a superadmin may retry after checking |
+| Hard bounce or complaint (webhook) | Delivery `bounced`; address added to suppressions |
+
+Every attempt writes a row in `notification_delivery_attempts`. Error summaries are redacted.
+
+### 11.3 Digest
+
+At each person's local digest time, eligible normal and low-priority items not yet emailed are gathered into one digest (unique per person and local day), linked back by `notifications.digest_id`, and sent as one delivery. Critical and high items never wait for a digest. Re-running the job cannot send the same digest twice.
+
+### 11.4 Alerts
+
+| Alert | Trigger | To |
+|---|---|---|
+| Lease expiring | 1 minute before a claim lapses | Lease holder |
+| Queue overdue | Tasks open longer than 24 h, once a day | Moderators |
+| Escalation required | Task escalated | Superadmins |
+| Security anomaly | Repeated `403` denials from one staff account | Superadmins |
+| Delivery failures | 5 or more failures in an hour | Superadmins |
+| Outbox backlog | Oldest unprocessed event older than 10 minutes | Superadmins |
+| Webhook anomaly | 5 or more failed signature checks in an hour | Superadmins |
+
+Each alert fires once per window. Because these travel through the system they monitor, they are also logged at ERROR and shown on the independent ops dashboard (`app/ops/providers/notifications.py`), which reads the tables directly.
+
+## 12. Endpoint reference
+
+Member routes need a session (writes need `X-CSRF-Token`). Superadmin routes follow the staff rules (non-staff `404`, moderator `403`, TOTP `aal2`) and every write is audited. No response contains an email address or an email body.
+
+### 12.1 Member inbox and preferences
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/notifications?limit=1..50&cursor=&archived=false&unread_only=false` | Own notices, newest first, with `next_cursor` and `unread` |
+| GET | `/notifications/unread-count` | `{ unread }` |
+| PATCH | `/notifications/{notification_id}` | `{ read?, archived? }` on own item only; other fields `422` |
+| POST | `/notifications/mark-all-read` | `{ unread: 0 }` |
+| GET | `/notification-preferences` | Mode, time zone, local time, `always_immediate` |
+| PUT | `/notification-preferences` | Same fields; IANA time zone required |
+| GET | `/notifications/stream` | Server-Sent Events: `unread` on connect, then `notification` events; connection lasts 5 minutes, then the browser reconnects |
+
+### 12.2 Superadmin operations
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/admin/notification-deliveries?status=&limit=` | Deliveries and status counts |
+| GET | `/admin/notification-deliveries/{delivery_id}` | One delivery with attempt history |
+| POST | `/admin/notification-deliveries/{delivery_id}/retry` | `{ reason }`; only `ambiguous` or `failed_permanently` |
+| GET | `/admin/notification-outbox?status=&limit=` | Outbox rows, counts, `oldest_unprocessed_at` |
+| GET | `/admin/notification-suppressions?active=true` | Suppressions (HMAC prefix only) |
+| POST | `/admin/notification-suppressions` | `{ email, channel, reason_code }` |
+| DELETE | `/admin/notification-suppressions/{suppression_id}` | `{ removal_reason }` |
+| GET | `/admin/notification-templates` | Keys, allowed variables, audience, live rule settings, active versions |
+| GET | `/admin/notification-templates/{template_key}/versions` | All versions |
+| POST | `/admin/notification-templates/{template_key}/versions` | New draft for one channel and language; only allowed `{variables}` |
+| POST | `/admin/notification-templates/{template_key}/versions/{version}/activate` | Activate; previous active version retires |
+| PATCH | `/admin/notification-rules/{template_key}` | `{ priority?, email?, enabled? }` |
+| POST | `/admin/tasks/{task_id}/assign` | Assign a task (produces assignment notices) |
+
+### 12.3 Provider webhook
+
+`POST /webhooks/notifications/{provider}` for `resend` (Svix signature, `RESEND_WEBHOOK_SECRET`) or `brevo` (`Authorization: Bearer <BREVO_WEBHOOK_TOKEN>`). No session. Outside a 5-minute timestamp window, bad signature or non-JSON is refused and counted for the anomaly alert. A provider without a configured secret is `404`. Each `(provider, provider_event_id)` is processed once.
+
+## 13. Security rules
+
+1. Clients cannot create notifications or change recipient, priority, delivery state or expiry; `PATCH` accepts only `read` and `archived` on one's own item.
+2. Template variables are allowlisted per key (`reference`, `deadline`, `question`, `count`, `outcome`, `role`); links come from an allowlisted route list.
+3. The clarification question is the only moderator free text and is shown to the applicant only.
+4. Suppressions store an HMAC of the normalised address, never the address or a plain hash.
+5. Webhooks are signed, replay-protected and deduplicated; only a redacted payload is kept.
+6. Logs never contain addresses, subjects or bodies (tested).
+7. Staff notices are filtered on every read by the reader's current role.
+
+## 14. Scaling path
+
+Each step is triggered by a measurement:
+
+1. **Separate worker process** when the API runs more than one instance or the free plan's sleep delays notices. The worker is already safe to run in parallel.
+2. **Live-update fan-out (P-N2).** Today each open SSE stream queries Postgres every 2 seconds, so 100 open tabs make about 50 small queries a second against a pool of 5 to 7 connections. Before that becomes a load, switch to Postgres `LISTEN/NOTIFY` (one listener per API instance) or Redis pub/sub, and query only when signalled.
+3. **Partition `notifications` by month** only if it passes several million rows; `expires_at` cleanup is enough until then.
+4. **A dedicated queue** only if the outbox backlog alert fires under normal load.
+
+---
+
+# Part C: Database
+
+## 15. Tables
+
+All in Supabase Postgres (migrations `0014`, `0017`). RLS is on and `anon` and `authenticated` have no grants; only the API's database role reaches them.
+
+| Table | Purpose | Key constraints |
+|---|---|---|
+| `outbox_events` | Shared outbox for every domain event (also used by moderation) | Unique `dedupe_key`; status `pending`/`processing`/`processed`/`retry`/`dead_letter`; `lease_until`, `available_at`, attempt count, error code |
+| `notifications` | One inbox item per event, recipient and kind | Unique `(event_id, recipient_user_id, kind)`; `priority`, `audience`, `template_key`+`template_version`, title and body in `bn` and `en`, allowlisted `link`, `delivery_mode`, `digest_id`, `read_at`, `archived_at`, `expires_at`, optional linked appeal |
+| `notification_deliveries` | One email delivery of a notification or a digest | Exactly one of `notification_id`/`digest_id`; unique per subject and channel; status, attempts, next attempt, send lease, provider message id, `destination_ref` (HMAC), redacted error |
+| `notification_delivery_attempts` | Append-only send history | Unique `(delivery_id, attempt_number)` |
+| `notification_provider_events` | Provider callbacks, stored once | Unique `(provider, provider_event_id)`; redacted payload |
+| `notification_templates` | Versioned texts per key, channel and language | Unique `(template_key, channel, locale, version)`; one active per key, channel and language |
+| `notification_rules` | Live tuning of catalogue rules | PK `template_key`; priority, email, enabled |
+| `notification_preferences` | Per-person email mode, time zone, local time | PK `recipient_user_id` |
+| `notification_suppressions` | Addresses not to email | One active row per HMAC and channel; reason, added and removed by |
+| `notification_digests` | One daily summary per person | Unique `(recipient_user_id, window_date)` |
+
+### 15.1 Retention
+
+| Data | Kept |
+|---|---|
+| Standard notifications | 90 days (`expires_at`) |
+| Critical notifications | 24 months |
+| Notifications linked to an open appeal | Until the appeal closes, then the rule above |
+| Processed outbox events | 30 days, unless a notification still refers to them |
+| Delivery attempts, provider events | With their delivery (review with a privacy check before launch) |
+
+Cleanup runs in `app/jobs/retention.py`, which re-checks open appeals before deleting. **The job has no production schedule yet** (P-N1).
+
+### 15.2 Indexes that keep reads fast
+
+| Index | Serves |
+|---|---|
+| `ix_notifications_recipient_created (recipient_user_id, created_at)` | Inbox pages (keyset cursor), unread count, SSE polling |
+| `ix_notifications_expires_at` | Retention cleanup |
+| `ix_notifications_digest_queue (delivery_mode, digest_id)` | Digest building |
+| `ix_outbox_events_relay (status, available_at)` | Worker claim |
+| `ix_notification_deliveries_due (status, next_attempt_at)` | Retry scan |
+| `ix_notification_deliveries_message (provider_message_id)` | Webhook lookup |
+
+When unread counts grow slow, add a partial index `(recipient_user_id) WHERE read_at IS NULL AND archived_at IS NULL`. Every new list endpoint gets a matching index and a cursor, never `OFFSET`.
+
+## 16. Planned
+
+| ID | Change | Why |
+|---|---|---|
+| P-N1 | Schedule `app/jobs/retention.py` (GitHub Actions cron calling an ops-token job route, like `visit-rollup.yml`) | Without it, notification expiry, outbox cleanup and suspension expiry do not run in production. |
+| P-N2 | Signal-based SSE (Postgres `LISTEN/NOTIFY` or Redis pub/sub) instead of a 2-second poll per stream | Removes the per-tab database load (14.2). |
+| P-N3 | Run the worker as its own process when the API scales out or sleeps | Notices are delayed while a free instance sleeps. |
+| P-N4 | Notices for the Planned moderation items: `content.reopened`, `verification.reopened`, `account.suspension_expired` | Needed once Moderation P-01, P-03 and P-05 exist. |
+
+---
+
+## 17. Extending the system
+
+### 17.1 Add a new notification
+
+1. In the business code, call `events.emit()` inside the same transaction as the change, with a stable event type and minimal payload. Capture staff recipients there if staff should be told.
+2. In `app/notify/registry.py`, add a `Template` (Bangla and English, allowed variables) and a `Rule` (event, kind, resolver, source field, priority, audience, route, conditions, required role).
+3. If it links somewhere new, add the route to `ROUTES`.
+4. Restart: version 1 of the template is stored automatically; superadmins can publish later versions from the dashboard.
+5. Test: event created with the decision, one notice per recipient, revoked staff excluded, no email when the rule says so.
+
+No database migration is needed for a new event.
+
+### 17.2 Add a new channel (push or SMS)
+
+1. Add the value to the `channel` check on `notification_deliveries` and `notification_templates` (migration).
+2. Write an adapter with the same `send()` contract as `providers.py` (returns a provider message id, raises a permanent or temporary failure).
+3. Add the channel to the rule model (`push: bool`) and to preferences.
+4. Reuse deliveries, attempts, retries, suppressions and webhooks unchanged.
+
+The event contract and the inbox do not change.
+
+### 17.3 Change email provider
+
+Set `EMAIL_PROVIDER` (`brevo`, `resend`, `smtp`, `gmail`, `mailpit` locally) and its secrets. For delivery and bounce tracking, configure that provider's webhook to `/webhooks/notifications/{provider}` (Resend and Brevo are supported).
+
+---
+
+# Part D: Verification
+
+## 18. Acceptance tests
+
+Implemented in `backend/tests/` on PostgreSQL:
+
+- [x] A decision, its audit row and its outbox event commit together; a rollback leaves no event.
+- [x] Two workers or a replayed event create one notification per recipient and kind.
+- [x] A crash after the provider call is `ambiguous`; failures retry on schedule then fail permanently.
+- [x] Every attempt has a history row.
+- [x] Webhook signatures are verified and duplicates ignored.
+- [x] The current verified address is used at send time; suppressed addresses are skipped.
+- [x] The digest is sent once at local time and never delays critical items.
+- [x] Standard and critical expiry is applied per row; notices linked to an open appeal are kept.
+- [x] Appealable notices link to appeals with the 30-day deadline.
+- [x] A revoked moderator is told and loses staff notices; captured staff are re-checked.
+- [x] RLS is on for every table with no client grants; members reach only their own items.
+- [x] Superadmin retries, template activation, rule changes and suppression changes are audited.
+- [x] Alerts fire once per window; the ops panel reads the tables independently.
+- [x] Logs contain no addresses or bodies.
+
+To add with the Planned items: the retention job runs on schedule in staging (P-N1); SSE load test with 200 open streams stays within the database pool (P-N2).
