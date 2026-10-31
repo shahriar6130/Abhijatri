@@ -84,6 +84,7 @@ TEMPLATES: dict[str, Template] = {
     "verification.clarification_requested": Template("যাচাইয়ের জন্য আরও তথ্য দরকার", "More information is needed", "মডারেটরের প্রশ্ন: {question} — যাচাই পাতায় উত্তর দিন।", "The moderator asks: {question} — answer on the verification page.", ("question",)),
     "verification.approved": Template("আপনি এখন যাচাইকৃত সদস্য", "You are now a Verified Member", "অভিনন্দন! আপনার রিভিউ এখন কমিউনিটি রেটিংয়ে গণনা হবে।", "Congratulations! Your reviews now count towards the Community Rating."),
     "verification.rejected": Template("যাচাই আবেদন অনুমোদিত হয়নি", "Verification was not approved", APPEAL_HINT[0], APPEAL_HINT[1]),
+    "verification.revoked": Template("যাচাইকৃত সদস্যের মর্যাদা বাতিল হয়েছে", "Your Verified Member status was removed", "আপনার রিভিউগুলো প্রকাশিত থাকবে, তবে কমিউনিটি রেটিংয়ে গণনা হবে না। সিদ্ধান্ত নিয়ে আপত্তি থাকলে আপিল করুন।", "Your reviews stay published but no longer count towards the Community Rating. You can appeal this decision."),
     # ---- members: appeals and reports ----
     "appeal.received": Template("আপিল গ্রহণ করা হয়েছে", "Your appeal was received", "আপিল নম্বর {reference}। একজন স্বাধীন মডারেটর এটি দেখবেন। শেষ তারিখ {deadline}।", "Case reference {reference}. An independent moderator will review it. Deadline {deadline}.", ("reference", "deadline")),
     "appeal.decided": Template("আপিলের সিদ্ধান্ত", "Your appeal was decided", "আপিল {reference}: {outcome}।", "Appeal {reference}: {outcome}.", ("reference", "outcome")),
@@ -100,6 +101,7 @@ TEMPLATES: dict[str, Template] = {
     "moderation.escalated": Template("কাজটি সুপারঅ্যাডমিনের কাছে গেছে", "Your task was escalated", "আপনার পাঠানো কাজটি এখন সুপারঅ্যাডমিন দেখবেন।", "The task you escalated is now with a superadmin."),
     "moderation.escalation_required": Template("এসকেলেশন: সিদ্ধান্ত দরকার", "Escalation needs a decision", "একটি কাজ সুপারঅ্যাডমিনের সিদ্ধান্তের অপেক্ষায়।", "A task is waiting for a superadmin decision."),
     "moderation.security_anomaly": Template("অস্বাভাবিক অনুমতি-প্রত্যাখ্যান", "Unusual denied actions", "এক কর্মীর অ্যাকাউন্ট থেকে অল্প সময়ে {count}টি প্রত্যাখ্যাত চেষ্টা। অডিট লগ দেখুন।", "{count} denied attempts from one staff account in a short time. Check the audit log.", ("count",)),
+    "ratings.drift_detected": Template("রেটিং যোগফল মিলছে না", "Rating totals do not match", "{count}টি গন্তব্যের সংরক্ষিত রেটিং যোগফল রিভিউয়ের সাথে মিলছে না। অডিট লগ দেখুন।", "{count} destinations have stored rating totals that do not match their reviews. Check the audit log.", ("count",)),
     "moderation.emergency_takedown": Template("জরুরি টেকডাউন: ২৪ ঘণ্টার মধ্যে পর্যালোচনা", "Emergency takedown: review within 24 hours", "একটি জরুরি টেকডাউন সুপারঅ্যাডমিনের পর্যালোচনার অপেক্ষায়।", "An emergency takedown is waiting for a superadmin review."),
     "staff.role_granted": Template("আপনাকে কর্মী-ভূমিকা দেওয়া হয়েছে", "You were given a staff role", "নতুন ভূমিকা: {role}। কর্মী ড্যাশবোর্ডে সাইন ইন করে অথেনটিকেটর চালু করুন।", "New role: {role}. Sign in to the staff dashboard and set up your authenticator.", ("role",)),
     "staff.role_revoked": Template("আপনার কর্মী-ভূমিকা তুলে নেওয়া হয়েছে", "Your staff role was removed", "আপনি আর কর্মী ড্যাশবোর্ড ব্যবহার করতে পারবেন না।", "You can no longer use the staff dashboard."),
@@ -135,6 +137,7 @@ RULES: tuple[Rule, ...] = (
     Rule("verification.submitted", "staff.verification_submitted", "captured_staff", "staff_recipients", "normal", audience="staff", route="staff:/"),
     Rule("verification.state_changed", "verification.clarification_requested", "payload_user", "applicant_id", "high", route="/account/verification", when=_when(state="needs_clarification")),
     Rule("verification.state_changed", "verification.approved", "payload_user", "applicant_id", "critical", route="/account/verification", when=_when(state="approved")),
+    Rule("verification.state_changed", "verification.revoked", "payload_user", "applicant_id", "critical", route="/account/appeals", when=_when(state="revoked")),
     Rule("verification.state_changed", "verification.rejected", "payload_user", "applicant_id", "critical", route="/account/appeals", when=_when(state="rejected")),
     # appeals and reports
     Rule("appeal.received", "appeal.received", "payload_user", "appellant_id", "critical", route="/account/appeals", appeal_field="appeal_id"),
@@ -150,6 +153,7 @@ RULES: tuple[Rule, ...] = (
     Rule("moderation.queue_overdue", "moderation.queue_overdue", "captured_staff", "staff_recipients", "normal", audience="staff", route="staff:/"),
     Rule("task.escalated", "moderation.escalated", "payload_user", "holder_id", "normal", audience="staff", email=False, route="staff:/"),
     Rule("task.escalated", "moderation.escalation_required", "captured_staff", "staff_recipients", "high", audience="staff", route="staff:/", role=SUPERADMIN),
+    Rule("ratings.drift_detected", "ratings.drift_detected", "captured_staff", "staff_recipients", "high", audience="staff", route="staff:/", role=SUPERADMIN),
     Rule("moderation.security_anomaly", "moderation.security_anomaly", "captured_staff", "staff_recipients", "high", audience="staff", route="staff:/", role=SUPERADMIN),
     # superadmins and role changes (the affected person is told even after losing the role)
     Rule("staff.role_changed", "staff.role_granted", "payload_user", "target_id", "critical", route="staff:/", when=_when(granted="true")),

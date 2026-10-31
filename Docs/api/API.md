@@ -130,6 +130,7 @@ Retryable writes accept `Idempotency-Key: <UUID>` (PF 12.4).
 | `GET /ops/panels/{panel_id}` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
 | `GET /ops/overview` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
 | `POST /ops/jobs/visit-rollup` | ops token | no-store | Implemented 22 Oct 2026 (section 5.16) |
+| `POST /ops/jobs/rating-reconciliation` | ops token | no-store | Implemented 31 Oct 2026 (R08) |
 
 `/health` returns `{ "status": "ok" }`. `/health/ready` checks the database and returns `503 SERVICE_UNAVAILABLE` if it is down. It must also report the deployed build and the database migration revision, because the deploy workflow polls it for both (PF 22.1):
 
@@ -625,6 +626,7 @@ Private, read-only API for the ops dashboard (`Docs/System-Monitoring-Dashboard.
 | `GET /ops/panels/{panel_id}?days=7\|30\|90` | One panel (shape below); unknown id is `404` |
 | `GET /ops/overview?days=7\|30\|90` | `{ generated_at, days, panels: [...] }`. First rolls up any missing finished day (best effort). |
 | `POST /ops/jobs/visit-rollup` | `{ "rolled_up": ["2026-10-21"] }`. Idempotent; `503` when Redis is not reachable. |
+| `POST /ops/jobs/rating-reconciliation` | `{ destinations_checked, drifts, clean }`. Detect-only nightly reconciliation (Review.md 6.3); never changes a total; drift alerts superadmins. |
 
 Panel shape (dashboard doc 6.2): `{ id, version, title, status: ok|degraded|unavailable, generated_at, refresh_seconds, sources: [{name, fresh_at}], blocks: [...], notes: [{bn,en}] }`. Block types are `stat` (`value`, optional `limit`, `level`, `hint`), `series` (`points: [{date, value}]`, `null` = no data), `table` (`columns`, `rows`) and `status` (`value`, `level`). A missing number is `null`, never `0`.
 
@@ -663,6 +665,9 @@ Needs a member session that holds an active staff role (`user_roles`, read from 
 | `POST /admin/tasks/{task_id}/escalate` | holder | `{ lease_token, reason }`. The task now needs a superadmin and the holder's lease ends. |
 | `POST /admin/submissions/{review_id}/moderation-actions` | staff | `{ task_id, lease_token, expected_version, decision: PUBLISH\|REJECT\|HIDE\|RESTORE, reason_code, note? }` -> `{ review_id, status, version, counted_rating, task_id }`. Order: role, lease, state and version, action row, audit row, event, one commit. `409 REVIEW_VERSION_CONFLICT`, `409 LEASE_LOST`, `422 TRANSITION_NOT_ALLOWED`, `403 SELF_MODERATION_FORBIDDEN`. |
 | `POST /admin/submissions/{review_id}/conflict` | staff | `{ expected_version, conflict_declared, reason_code, note? }` |
+| `POST /admin/members/{user_id}/verification/revoke` | staff | `{ reason_code }` -> `{ user_id, verification_id, reviews_uncounted }`. Ends the member's Verified status for abuse and removes every rating they contributed from the destination totals, in one transaction (Review.md 6.3). The reviews stay published. `404` when no active Verified Member record exists (also the answer to a repeat), `403` for your own account. Audited as `verification.revoke_for_abuse`; the member is notified. |
+| `POST /admin/ratings/reconcile` | superadmin | `{ repair?: false }` -> `{ destinations_checked, repaired, drifts: [{ destination_id, kind: community\|guest\|category\|review, key, stored, expected, repairable }] }`. Recomputes every destination's totals from the review rows. `repair: false` never changes a total; `repair: true` overwrites drifting totals under row locks with one `ratings.reconcile_repair` audit event each. `review` drifts are reported only. |
+| `GET /admin/rating-evidence` | staff | `{ threshold, verified_members: { active, ever_approved }, verification_turnaround_hours: { decisions, median, maximum }, destinations: [{ destination_id, name_en, eligible_reviews, mode: top_rated\|seeded }] }` (Review.md 6.4 semester evidence). |
 | `POST /admin/bulk/moderation-actions` | staff | `{ items: [{ review_id, ...decision body }] }` (at most 25). Each item is atomic; the answer lists `{ review_id, ok, result \| error }` per item plus `succeeded` and `failed`. |
 | `POST /admin/reports/{report_id}/transition` | staff | `{ to: in_review\|actioned\|dismissed, expected_version, reason_code, note?, task_id, lease_token }`. Allowed: `open` -> `in_review`, `actioned`, `dismissed`; `in_review` -> `actioned`, `dismissed`. Anything else is `422 TRANSITION_NOT_ALLOWED`. |
 | `GET /admin/audit-events?action=&target_type=&target_id=&actor_user_id=&before=&limit=` | staff | Newest first, `{ items, next_before }` |

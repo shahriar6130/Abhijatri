@@ -300,3 +300,11 @@ Work may proceed beyond the first review slice only after these gates have evide
 
 The Review specification is frozen after the schema amendments. Necessary implementation changes are added to this decisions log rather than rewriting the architecture. Redis, CDN integration, and the image pipeline remain out of scope until implementation steps 1 through 9 and their regression tests pass.
 
+## 2026-10-31 (R08 rating exclusion)
+| Decision | Choice | Reason |
+|---|---|---|
+| Serious reports | Only `privacy` and `conflict_of_interest` take a published review out of the rating while the report is open. `spam`, `offensive`, `false_information` and `other` do not. | Review.md 6.1 says "serious unresolved report"; the report reasons have no severity field. One constant (`app.eligibility.SERIOUS_REPORT_REASONS`) changes the list. |
+| Duplicates | A later review by the same author for the same destination and month does not count while an earlier one does. | Possible only through the moderator `duplicate_override`; keeps one voice per visit. |
+| Invalid reviews | New `INELIGIBLE_INVALID` for a future visit month, no text or a rating out of range. | The existing values would have been misleading. Published text is unaffected. |
+| Abuse revocation | Moderator or superadmin, reason required, not on yourself; reviews stay public but stop counting. | Review.md 6.3; staying public avoids a second decision about the text. |
+| Repair | Detect-only nightly; repair only by explicit superadmin call or CLI flag, audited. | Review.md 6.3. |

@@ -2604,6 +2604,18 @@
         "title": "ReceiptStatusRequest",
         "type": "object"
       },
+      "ReconcileBody": {
+        "additionalProperties": false,
+        "properties": {
+          "repair": {
+            "default": false,
+            "title": "Repair",
+            "type": "boolean"
+          }
+        },
+        "title": "ReconcileBody",
+        "type": "object"
+      },
       "RegisterRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3428,6 +3440,22 @@
           "created_at"
         ],
         "title": "RevisionInfo",
+        "type": "object"
+      },
+      "RevokeVerificationBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "RevokeVerificationBody",
         "type": "object"
       },
       "RoleBody": {
@@ -4378,6 +4406,62 @@
         ]
       }
     },
+    "/api/v1/admin/members/{user_id}/verification/revoke": {
+      "post": {
+        "description": "End a member's Verified status for abuse and uncount their ratings in one transaction (Review.md 6.3).",
+        "operationId": "revoke_verification_api_v1_admin_members__user_id__verification_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeVerificationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Verification Api V1 Admin Members  User Id  Verification Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Verification",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/monitoring/summary": {
       "get": {
         "operationId": "monitoring_summary_api_v1_admin_monitoring_summary_get",
@@ -5069,6 +5153,74 @@
           }
         },
         "summary": "Queue",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/rating-evidence": {
+      "get": {
+        "description": "The semester evidence figures of Review.md 6.4.",
+        "operationId": "rating_evidence_api_v1_admin_rating_evidence_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rating Evidence Api V1 Admin Rating Evidence Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rating Evidence",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ratings/reconcile": {
+      "post": {
+        "description": "Recompute every destination's totals from the review rows. Detecting never writes; repair is explicit and audited.",
+        "operationId": "reconcile_ratings_api_v1_admin_ratings_reconcile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reconcile Ratings Api V1 Admin Ratings Reconcile Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile Ratings",
         "tags": [
           "admin"
         ]
@@ -6914,6 +7066,58 @@
         "summary": "Update Notification",
         "tags": [
           "members"
+        ]
+      }
+    },
+    "/api/v1/ops/jobs/rating-reconciliation": {
+      "post": {
+        "description": "Detect-only nightly reconciliation (Review.md 6.3). Never changes a total; drift alerts superadmins.",
+        "operationId": "rating_reconciliation_api_v1_ops_jobs_rating_reconciliation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rating Reconciliation Api V1 Ops Jobs Rating Reconciliation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rating Reconciliation",
+        "tags": [
+          "ops"
         ]
       }
     },

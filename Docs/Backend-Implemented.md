@@ -914,3 +914,36 @@ Questions from the project owner, answered from the code and from a live run aga
 **Evidence of the review author controls online:** guest round trip (edit, Ask for changes, edit, Reject) ended at version 5 with both decisions in the audit log; member paging with a page size of 1, cursor rules, filters, edit, stale edit, cleared categories, self-moderation refused, withdraw and its retry, edit after withdraw refused. Full list: `Docs/Review-Frontend-Manual-Test-Cases.docx` section 3a.
 
 **Author names on published reviews (30 Oct 2026).** An older account had its sign-in email as its display name, and the public review feed showed it. `public_author_name` (`app/auth/validation.py`) now withholds any name containing `@` (the page shows "Member"), and sign-up refuses such a name with `VALIDATION_FAILED` on `display_name` (`INVALID_VALUE`); the sign-up form says so in English and Bangla. Staff screens still show emails on purpose. Tests: `test_validators` in `tests/test_auth.py`, `displayNameProblem` in `authValidation.test.ts`.
+
+### 5.21 R08: Bayesian score and rating exclusion logic (31 October 2026)
+
+**What already existed.** The score (`review_parameters.community_score`: prior mean 3.5, weight 5, hidden below 5 eligible reviews), the O(1) totals with row locks, and the publish, reject, hide, restore, withdraw and conflict-flag transitions were built earlier. R08 adds what Review.md 6.1 to 6.4 still required.
+
+**One eligibility rule set (`app/eligibility.py`).** `evaluate_eligibility` is the only place that decides whether a published review counts; `services._add_published_rating` calls it. The first failing check names the reason:
+
+| Order | Rule | Result |
+|---|---|---|
+| 1 | Not published | `INELIGIBLE_REMOVED` (`INELIGIBLE_REPORTED` while hidden) |
+| 2 | Conflict of interest declared | `INELIGIBLE_CONFLICT` (also for a Guest review) |
+| 3 | Guest review | `INELIGIBLE_GUEST`: counts in Guest Feedback only |
+| 4 | Team account, or no active Verified Member record (none, expired, revoked, not approved) | `INELIGIBLE_UNVERIFIED` |
+| 5 | Visit month in the future, no text, or rating out of range | `INELIGIBLE_INVALID` (new) |
+| 6 | Same author already has a counted review of this destination and month (only possible with `duplicate_override`; the earlier one keeps the count) | `INELIGIBLE_DUPLICATE` |
+| 7 | An open or in-review report with a serious reason (`privacy`, `conflict_of_interest`) | `INELIGIBLE_REPORTED` |
+| 8 | Otherwise | `ELIGIBLE` |
+
+Eligibility is frozen at publication: ordinary verification expiry never uncounts a review (Review.md 6.3).
+
+**`recheck_rating` (`app/services.py`).** Locks the review, then the destination totals; removes the old contribution, re-evaluates, adds the new one. It changes nothing, not even the version, when the answer is unchanged. Serious reports use it: `create_report` uncounts the review and closing the report (`actioned` or `dismissed`) restores it. A report alone never hides the text.
+
+**Verification revoked for abuse (`app/rating_integrity.py`).** `POST /admin/members/{user_id}/verification/revoke` (moderator or superadmin, reason required, never your own account) sets `revoked_at` and `revocation_reason`, then re-checks every counted published review of that author, locking destinations in id order. The reviews stay public; they stop feeding the Community Rating. Audited as `verification.revoke_for_abuse` with the review count; the member gets the new `verification.revoked` notice. A repeat answers `404`. This is the documented exception to the no-full-scan rule and touches one author's reviews only.
+
+**Reconciliation.** `reconcile` recomputes the community, guest and per-category totals of every destination from the review rows and compares them with the stored totals. Detecting never writes. `repair=true` locks each drifting destination, overwrites the totals, bumps the totals version and writes one `ratings.reconcile_repair` audit event with before and after. A review row that contradicts itself (counted while not published, or published and eligible but not counted) is reported, never repaired. Entry points: `python -m app.jobs.reconcile_ratings [--repair]` (exit status 1 on drift), `POST /ops/jobs/rating-reconciliation` (ops token, detect-only), `POST /admin/ratings/reconcile` (superadmin, `{repair}`), and the workflow `.github/workflows/rating-reconciliation.yml` (00:45 Dhaka, calls the ops route). Drift raises one `ratings.drift_detected` notice a day to superadmins. Each run writes a `ratings.reconcile_run` audit event.
+
+**Semester evidence.** `GET /admin/rating-evidence`: active and ever-approved Verified Members, median and maximum approval turnaround in hours, and for each published destination the eligible count and `top_rated` or `seeded`.
+
+**Migration `0019_rating_integrity`.** Adds `INELIGIBLE_INVALID` to `rating_eligibility`. The downgrade maps rows using it to `INELIGIBLE_REMOVED` (PostgreSQL cannot drop an enum value).
+
+**Evidence (31 October 2026).** `tests/test_rating_exclusion.py` (33 tests: formula table, every rule, public feed and totals after hide, reject, withdraw, delete, report and restore, a random-transition property test that reconciles after every step) and `tests/test_rating_integrity.py` (revocation, race with a publish, atomic failure, drift detection, repair, nightly job, evidence, access rules, CSRF, TOTP, ops route). Removing the duplicate or serious-report rule makes three of them fail. Full suite: 287 unit and 272 integration tests, migration round trip and `alembic check` clean. Online project: totals of all five destinations equal a full recomputation and no review row contradicts itself (read-only check). **Migration 0019 is not yet applied online**: it is applied by the container on the next deploy (`alembic upgrade head` at start).
+
+**Not built.** A ranked Top Rated list (discovery, H02); a staff button for revocation (the API is ready); a delete workflow (the `DELETED` state is excluded by the rules and tested).

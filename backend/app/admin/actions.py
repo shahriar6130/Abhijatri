@@ -16,9 +16,10 @@ from sqlalchemy.orm import Session
 from app import media
 from app.admin import audit, tasks
 from app.auth.sessions import Principal
+from app.eligibility import SERIOUS_REPORT_REASONS
 from app.errors import ApiError
 from app.models import ModerationDecision, OutboxEvent, Report, Review, ReviewStatus
-from app.services import ReviewError, moderate_review, set_review_conflict
+from app.services import ReviewError, moderate_review, recheck_rating, set_review_conflict
 
 REPORT_REASONS = ("spam", "offensive", "false_information", "privacy", "conflict_of_interest", "other")
 
@@ -163,6 +164,8 @@ def create_report(session: Session, reporter: Principal, *, review_id: uuid.UUID
             payload={"report_id": str(report.id), "review_id": str(review_id), "reason_code": reason_code},
         )
     )
+    if reason_code in SERIOUS_REPORT_REASONS:
+        recheck_rating(session, review_id)  # a serious open report takes the review out of the rating (Review.md 6.1)
     return report
 
 
@@ -192,6 +195,9 @@ def transition_report(
         raise ApiError("TRANSITION_NOT_ALLOWED")
     previous = report.state
     report.state, report.version = to, report.version + 1
+    session.flush()
+    if to in REPORT_FINAL and report.reason_code in SERIOUS_REPORT_REASONS:
+        recheck_rating(session, report.review_id)  # closing it lets the review count again
     if to in REPORT_FINAL:
         report.resolved_by, report.resolution_note = principal.user.id, note
         report.resolved_at = datetime.now(UTC)

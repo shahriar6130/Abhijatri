@@ -244,7 +244,7 @@ erDiagram
 | `moderation_actions` | Append-only record of each moderation transition. | FK `RESTRICT` to review and actor. | Internal audit |
 | `outbox_events` | The shared outbox (Notification spec 7.1): `topic` is the event type, plus `dedupe_key` (unique), `aggregate_type`/`aggregate_version`, `recipient_policy`, `occurred_at`, status pending/processing/processed/retry/dead_letter, lease owner and expiry (`lease_until`), next attempt (`available_at`), error code. | Processed rows are deleted after 30 days unless a notification still refers to them. | Internal |
 
-Enums: `destination_status`, `source_type`, `guide_category`, `advisory_severity`, `contact_kind`, `review_status`, `rating_eligibility`, `revision_status`, `review_language`, `traveller_type`, `comfort_tier`, `moderation_decision`, `moderation_previous_status`, `moderation_new_status`, `review_category`, `rating_audience`.
+Enums: `destination_status`, `source_type`, `guide_category`, `advisory_severity`, `contact_kind`, `review_status`, `rating_eligibility` (adds `INELIGIBLE_INVALID`, migration `0019`), `revision_status`, `review_language`, `traveller_type`, `comfort_tier`, `moderation_decision`, `moderation_previous_status`, `moderation_new_status`, `review_category`, `rating_audience`.
 
 ## 3. Planned tables (not yet migrated)
 

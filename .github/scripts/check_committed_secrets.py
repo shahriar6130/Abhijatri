@@ -25,6 +25,7 @@ ALLOWED_DOCUMENTS = {
     "Docs/Abhijatri-Proposal-Judging-Checklist.docx",
     "Docs/Abhijatri-Venn-Diagram.docx",
     "Docs/Review-Frontend-Manual-Test-Cases.docx",
+    "Docs/R08-Rating-Test-Cases.docx",
 }
 DOCUMENT_SUFFIXES = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "redis", "h"}

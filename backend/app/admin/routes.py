@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import media
+from app import media, rating_integrity
 from app.admin import actions, audit, cases, idempotency, roles, tasks
 from app.auth.sessions import MemberPrincipal, Principal, require_recent_auth, staff_principal
 from app.db import get_session
@@ -459,6 +459,48 @@ def set_conflict(review_id: uuid.UUID, body: ConflictBody, request: Request, pri
             request_id=_request_id(request),
         ),
     )
+
+
+class RevokeVerificationBody(_Body):
+    reason_code: str = Field(min_length=2, max_length=60)
+
+
+class ReconcileBody(_Body):
+    repair: bool = False
+
+
+@router.post("/members/{user_id}/verification/revoke")
+def revoke_verification(user_id: uuid.UUID, body: RevokeVerificationBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
+    """End a member's Verified status for abuse and uncount their ratings in one transaction (Review.md 6.3)."""
+    return _run(
+        session, principal, request, "verification.revoke", "user", user_id,
+        lambda: rating_integrity.revoke_verification_for_abuse(
+            session, principal, user_id=user_id, reason_code=body.reason_code, request_id=_request_id(request)
+        ),
+    )
+
+
+@router.post("/ratings/reconcile")
+def reconcile_ratings(body: ReconcileBody, request: Request, principal: Superadmin, session: DbSession) -> dict[str, Any]:
+    """Recompute every destination's totals from the review rows. Detecting never writes; repair is explicit and audited."""
+    def work() -> dict[str, Any]:
+        result = rating_integrity.run_reconciliation(session, repair=body.repair, actor=principal, request_id=_request_id(request))
+        return {
+            "destinations_checked": result.destinations_checked,
+            "repaired": result.repaired,
+            "drifts": [
+                {"destination_id": str(d.destination_id), "kind": d.kind, "key": d.key, "stored": d.stored, "expected": d.expected, "repairable": d.repairable}
+                for d in result.drifts
+            ],
+        }
+
+    return _run(session, principal, request, "ratings.reconcile", "system", "ratings", work)
+
+
+@router.get("/rating-evidence")
+def rating_evidence(principal: Staff, session: DbSession) -> dict[str, Any]:
+    """The semester evidence figures of Review.md 6.4."""
+    return rating_integrity.rating_evidence(session)
 
 
 @router.post("/bulk/moderation-actions")

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app import crypto
 from app.admin.tasks import cancel_open_tasks, ensure_task
 from app.config import get_settings
+from app.eligibility import evaluate_eligibility
 from app.guest_tag import stored_guest_tag
 from app.models import (
     Appeal,
@@ -35,7 +36,6 @@ from app.models import (
     ReviewStatus,
     RevisionStatus,
     User,
-    Verification,
 )
 from app.notify import events
 from app.schemas import (
@@ -510,52 +510,51 @@ def _remove_counted_rating(session: Session, review: Review, stats: DestinationR
     stats.updated_at = now_utc()
 
 
-def _is_verified_member_eligible(session: Session, review: Review) -> bool:
-    if review.author_user_id is None or review.conflict_declared:
-        return False
-    author = session.get(User, review.author_user_id)
-    if author is None or author.is_team_account:
-        return False
-    now = now_utc()
-    return (
-        session.scalar(
-            select(Verification.id).where(
-                Verification.user_id == review.author_user_id,
-                Verification.verification_type == "VERIFIED_MEMBER",
-                Verification.status == "APPROVED",
-                Verification.revoked_at.is_(None),
-                or_(Verification.expires_at.is_(None), Verification.expires_at > now),
-            )
-        )
-        is not None
-    )
-
-
 def _add_published_rating(
     session: Session,
     review: Review,
     stats: DestinationRatingStats,
 ) -> None:
-    if review.conflict_declared:
-        review.rating_eligibility = RatingEligibility.INELIGIBLE_CONFLICT
-        review.counted_rating = None
-        return
-    if review.author_user_id is None:
-        review.rating_eligibility = RatingEligibility.INELIGIBLE_GUEST
+    """Count a published review where Review.md 6.1 says it counts, and record why when it does not."""
+    eligibility = evaluate_eligibility(session, review)
+    review.rating_eligibility = eligibility
+    if eligibility == RatingEligibility.INELIGIBLE_GUEST:
         stats.guest_rating_sum += review.overall_rating
         stats.guest_rating_count += 1
-    elif _is_verified_member_eligible(session, review):
-        review.rating_eligibility = RatingEligibility.ELIGIBLE
+    elif eligibility == RatingEligibility.ELIGIBLE:
         stats.community_rating_sum += review.overall_rating
         stats.community_rating_count += 1
     else:
-        review.rating_eligibility = RatingEligibility.INELIGIBLE_UNVERIFIED
         review.counted_rating = None
         return
     _apply_category_delta(session, review, +1)
     review.counted_rating = review.overall_rating
     stats.version += 1
     stats.updated_at = now_utc()
+
+
+def recheck_rating(session: Session, review_id: uuid.UUID) -> Review:
+    """Re-evaluate one published review and move the aggregates by the difference (Review.md 6.1, 6.3).
+
+    Used when something other than a moderation decision changes whether the review counts: a serious
+    report opens or closes, a verification is revoked, a duplicate is cleared. The review row is locked
+    first and the aggregate row second, as in every other transition. Nothing changes, and the review
+    version stays the same, when the answer is the same as before.
+    """
+    review = _lock_review(session, review_id)
+    if review.status != ReviewStatus.PUBLISHED:
+        return review
+    now_counted = review.counted_rating is not None
+    new_state = evaluate_eligibility(session, review)
+    will_count = new_state in (RatingEligibility.ELIGIBLE, RatingEligibility.INELIGIBLE_GUEST)
+    if new_state == review.rating_eligibility and will_count == now_counted:
+        return review
+    stats = _lock_stats(session, review.destination_id)
+    _remove_counted_rating(session, review, stats)
+    _add_published_rating(session, review, stats)
+    review.version += 1
+    review.updated_at = now_utc()
+    return review
 
 
 def moderate_review(

@@ -12,7 +12,7 @@ import redis
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from app import visits
+from app import rating_integrity, visits
 from app.abuse import CounterSessions
 from app.config import get_settings
 from app.db import get_session
@@ -108,3 +108,16 @@ def visit_rollup(
         session.rollback()
         raise ApiError("SERVICE_UNAVAILABLE")
     return {"rolled_up": [day.isoformat() for day in days]}
+
+
+@router.post("/jobs/rating-reconciliation")
+@limiter.limit(OPS_RATE)
+def rating_reconciliation(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Detect-only nightly reconciliation (Review.md 6.3). Never changes a total; drift alerts superadmins."""
+    try:
+        result = rating_integrity.run_reconciliation(session, repair=False, actor=None)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    return {"destinations_checked": result.destinations_checked, "drifts": len(result.drifts), "clean": result.clean}
