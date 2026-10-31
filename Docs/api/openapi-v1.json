@@ -97,6 +97,64 @@
         "title": "AdvisorySeverity",
         "type": "string"
       },
+      "AnonymousReportBody": {
+        "additionalProperties": false,
+        "properties": {
+          "contact": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "reason_code": {
+            "maxLength": 40,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "turnstile_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnstile Token"
+          }
+        },
+        "required": [
+          "review_id",
+          "reason_code"
+        ],
+        "title": "AnonymousReportBody",
+        "type": "object"
+      },
       "AppealBody": {
         "additionalProperties": false,
         "properties": {
@@ -1098,7 +1156,7 @@
         "additionalProperties": false,
         "properties": {
           "counts_toward_rating": {
-            "default": true,
+            "default": false,
             "title": "Counts Toward Rating",
             "type": "boolean"
           },
@@ -1541,6 +1599,45 @@
           "status"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HidePendingBody": {
+        "additionalProperties": false,
+        "properties": {
+          "counts_toward_rating": {
+            "default": false,
+            "title": "Counts Toward Rating",
+            "type": "boolean"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "lease_token": {
+            "format": "uuid",
+            "title": "Lease Token",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "reason_code",
+          "task_id",
+          "lease_token"
+        ],
+        "title": "HidePendingBody",
         "type": "object"
       },
       "LeaseBody": {
@@ -2604,6 +2701,18 @@
         "title": "ReceiptStatusRequest",
         "type": "object"
       },
+      "ReconcileBody": {
+        "additionalProperties": false,
+        "properties": {
+          "repair": {
+            "default": false,
+            "title": "Repair",
+            "type": "boolean"
+          }
+        },
+        "title": "ReconcileBody",
+        "type": "object"
+      },
       "RegisterRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2659,6 +2768,81 @@
         "title": "RemovalBody",
         "type": "object"
       },
+      "RemovalRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "contact": {
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Contact",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "statement": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Statement",
+            "type": "string"
+          },
+          "turnstile_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnstile Token"
+          }
+        },
+        "required": [
+          "review_id",
+          "statement",
+          "contact"
+        ],
+        "title": "RemovalRequestBody",
+        "type": "object"
+      },
+      "ReopenBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "reason_code"
+        ],
+        "title": "ReopenBody",
+        "type": "object"
+      },
       "ReportBody": {
         "additionalProperties": false,
         "properties": {
@@ -2675,7 +2859,8 @@
             "title": "Details"
           },
           "reason_code": {
-            "pattern": "^(spam|offensive|false_information|privacy|conflict_of_interest|other)$",
+            "maxLength": 40,
+            "minLength": 2,
             "title": "Reason Code",
             "type": "string"
           }
@@ -3430,6 +3615,22 @@
         "title": "RevisionInfo",
         "type": "object"
       },
+      "RevokeVerificationBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "RevokeVerificationBody",
+        "type": "object"
+      },
       "RoleBody": {
         "additionalProperties": false,
         "properties": {
@@ -3890,6 +4091,7 @@
     },
     "/api/v1/admin/audit-events": {
       "get": {
+        "description": "Newest first, filterable, with a keyset cursor (rows sharing a timestamp are never skipped).",
         "operationId": "audit_events_api_v1_admin_audit_events_get",
         "parameters": [
           {
@@ -3962,6 +4164,74 @@
           },
           {
             "in": "query",
+            "name": "actor_role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(moderator|superadmin)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
             "name": "before",
             "required": false,
             "schema": {
@@ -3975,6 +4245,23 @@
                 }
               ],
               "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           },
           {
@@ -4015,6 +4302,198 @@
           }
         },
         "summary": "Audit Events",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/audit-events/actions": {
+      "get": {
+        "description": "Every action name the log can hold, for the filter list. A refused attempt is `denied.<action>`.",
+        "operationId": "audit_actions_catalogue_api_v1_admin_audit_events_actions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Actions Catalogue Api V1 Admin Audit Events Actions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Audit Actions Catalogue",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/audit-events/export": {
+      "get": {
+        "description": "CSV of the matching events (at most 10,000), for superadmins. The export is itself an audit event.",
+        "operationId": "export_audit_events_api_v1_admin_audit_events_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(moderator|superadmin)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Audit Events",
         "tags": [
           "admin"
         ]
@@ -4373,6 +4852,62 @@
           }
         },
         "summary": "Decide Media",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/members/{user_id}/verification/revoke": {
+      "post": {
+        "description": "End a member's Verified status for abuse and uncount their ratings in one transaction (Review.md 6.3).",
+        "operationId": "revoke_verification_api_v1_admin_members__user_id__verification_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeVerificationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Verification Api V1 Admin Members  User Id  Verification Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Verification",
         "tags": [
           "admin"
         ]
@@ -5074,6 +5609,154 @@
         ]
       }
     },
+    "/api/v1/admin/rating-evidence": {
+      "get": {
+        "description": "The semester evidence figures of Review.md 6.4.",
+        "operationId": "rating_evidence_api_v1_admin_rating_evidence_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rating Evidence Api V1 Admin Rating Evidence Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rating Evidence",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ratings/reconcile": {
+      "post": {
+        "description": "Recompute every destination's totals from the review rows. Detecting never writes; repair is explicit and audited.",
+        "operationId": "reconcile_ratings_api_v1_admin_ratings_reconcile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reconcile Ratings Api V1 Admin Ratings Reconcile Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconcile Ratings",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reason-codes": {
+      "get": {
+        "description": "The reason codes a decision may carry, with Bangla and English labels. Strict groups refuse anything else.",
+        "operationId": "reason_codes_api_v1_admin_reason_codes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reason Codes Api V1 Admin Reason Codes Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reason Codes",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reports/{report_id}/hide-pending": {
+      "post": {
+        "description": "Hide a reported review until a decision is recorded (Review.md 5.4). A moderator's choice, never automatic.",
+        "operationId": "hide_pending_decision_api_v1_admin_reports__report_id__hide_pending_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HidePendingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Hide Pending Decision Api V1 Admin Reports  Report Id  Hide Pending Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Pending Decision",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/reports/{report_id}/transition": {
       "post": {
         "operationId": "transition_report_api_v1_admin_reports__report_id__transition_post",
@@ -5124,6 +5807,137 @@
           }
         },
         "summary": "Transition Report",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reviews": {
+      "get": {
+        "description": "Rejected and Hidden reviews, newest decision first, each with how long it can still be recovered.",
+        "operationId": "list_reviews_by_status_api_v1_admin_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": true,
+            "schema": {
+              "pattern": "^(REJECTED|HIDDEN)$",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Reviews By Status Api V1 Admin Reviews Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Reviews By Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/reviews/{review_id}/reopen": {
+      "post": {
+        "description": "Send a rejected review back to the queue, within 30 days of the rejection (Moderation spec P-03).",
+        "operationId": "reopen_review_api_v1_admin_reviews__review_id__reopen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReopenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reopen Review Api V1 Admin Reviews  Review Id  Reopen Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reopen Review",
         "tags": [
           "admin"
         ]
@@ -6917,6 +7731,112 @@
         ]
       }
     },
+    "/api/v1/ops/jobs/rating-reconciliation": {
+      "post": {
+        "description": "Detect-only nightly reconciliation (Review.md 6.3). Never changes a total; drift alerts superadmins.",
+        "operationId": "rating_reconciliation_api_v1_ops_jobs_rating_reconciliation_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rating Reconciliation Api V1 Ops Jobs Rating Reconciliation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rating Reconciliation",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/api/v1/ops/jobs/retention": {
+      "post": {
+        "description": "Idempotent daily sweep (Moderation spec 11.3, P-01): evidence, notifications, expired sanctions, rejected\nreviews and report contacts. Called by GitHub Actions; running it twice does no harm.",
+        "operationId": "run_retention_api_v1_ops_jobs_retention_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Run Retention Api V1 Ops Jobs Retention Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Retention",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
     "/api/v1/ops/jobs/visit-rollup": {
       "post": {
         "description": "Idempotent; called nightly by GitHub Actions and by the dashboard's \"Run roll-up\" button.",
@@ -7148,6 +8068,162 @@
         "summary": "Get One Panel",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/api/v1/public/removal-requests": {
+      "post": {
+        "description": "The author lost the receipt. A moderator checks ownership out of band using the contact given here.",
+        "operationId": "request_removal_without_receipt_api_v1_public_removal_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemovalRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Request Removal Without Receipt Api V1 Public Removal Requests Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Removal Without Receipt",
+        "tags": [
+          "public-reports"
+        ]
+      }
+    },
+    "/api/v1/public/review-reports": {
+      "post": {
+        "operationId": "report_review_anonymously_api_v1_public_review_reports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnonymousReportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Report Review Anonymously Api V1 Public Review Reports Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Review Anonymously",
+        "tags": [
+          "public-reports"
+        ]
+      }
+    },
+    "/api/v1/reports/mine": {
+      "get": {
+        "description": "The member's own reports and where each stands. No staff notes, reasons or names are included.",
+        "operationId": "my_reports_api_v1_reports_mine_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Reports Api V1 Reports Mine Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Reports",
+        "tags": [
+          "reports"
         ]
       }
     },

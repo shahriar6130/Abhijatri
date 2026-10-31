@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { StaffError, getSession, logout } from './api';
 import { Audit } from './screens/Audit';
+import { Decided } from './screens/Decided';
 import { Enforcement } from './screens/Enforcement';
 import { Inbox } from './screens/Inbox';
 import { Media } from './screens/Media';
@@ -12,7 +13,7 @@ import { StaffRoles } from './screens/Staff';
 import type { Lang, Session } from './types';
 import { Notice, makeT } from './ui';
 
-type View = 'queue' | 'inbox' | 'media' | 'enforcement' | 'audit' | 'staff' | 'monitor' | 'notifications';
+type View = 'queue' | 'inbox' | 'media' | 'decided' | 'enforcement' | 'audit' | 'staff' | 'monitor' | 'notifications';
 
 /**
  * The staff shell. It shows only what the signed-in role may use, but that is a convenience: every
@@ -66,6 +67,7 @@ export function App() {
     { id: 'queue', label: t('কাজের সারি', 'Queue'), show: true },
     { id: 'inbox', label: t('ইনবক্স', 'Inbox'), show: true },
     { id: 'media', label: t('ছবি ও ভিডিও', 'Media'), show: true },
+    { id: 'decided', label: t('বাতিল ও লুকানো', 'Rejected & hidden'), show: true },
     { id: 'enforcement', label: t('এনফোর্সমেন্ট', 'Enforcement'), show: true },
     { id: 'audit', label: t('অডিট', 'Audit'), show: true },
     { id: 'monitor', label: t('পর্যবেক্ষণ', 'Monitoring'), show: true },
@@ -105,7 +107,8 @@ export function App() {
       {view === 'media' && <Media lang={lang} />}
       {view === 'notifications' && role === 'superadmin' && <Notifications lang={lang} />}
       {view === 'enforcement' && <Enforcement lang={lang} role={role} />}
-      {view === 'audit' && <Audit lang={lang} />}
+      {view === 'decided' && <Decided lang={lang} role={role} />}
+      {view === 'audit' && <Audit lang={lang} role={role} />}
       {view === 'monitor' && <Monitor lang={lang} />}
       {view === 'staff' && role === 'superadmin' && <StaffRoles lang={lang} hasAuthenticator={session.mfa_factors.length > 0} />}
     </div>

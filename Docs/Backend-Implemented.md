@@ -914,3 +914,65 @@ Questions from the project owner, answered from the code and from a live run aga
 **Evidence of the review author controls online:** guest round trip (edit, Ask for changes, edit, Reject) ended at version 5 with both decisions in the audit log; member paging with a page size of 1, cursor rules, filters, edit, stale edit, cleared categories, self-moderation refused, withdraw and its retry, edit after withdraw refused. Full list: `Docs/Review-Frontend-Manual-Test-Cases.docx` section 3a.
 
 **Author names on published reviews (30 Oct 2026).** An older account had its sign-in email as its display name, and the public review feed showed it. `public_author_name` (`app/auth/validation.py`) now withholds any name containing `@` (the page shows "Member"), and sign-up refuses such a name with `VALIDATION_FAILED` on `display_name` (`INVALID_VALUE`); the sign-up form says so in English and Bangla. Staff screens still show emails on purpose. Tests: `test_validators` in `tests/test_auth.py`, `displayNameProblem` in `authValidation.test.ts`.
+
+### 5.21 R08: Bayesian score and rating exclusion logic (31 October 2026)
+
+**What already existed.** The score (`review_parameters.community_score`: prior mean 3.5, weight 5, hidden below 5 eligible reviews), the O(1) totals with row locks, and the publish, reject, hide, restore, withdraw and conflict-flag transitions were built earlier. R08 adds what Review.md 6.1 to 6.4 still required.
+
+**One eligibility rule set (`app/eligibility.py`).** `evaluate_eligibility` is the only place that decides whether a published review counts; `services._add_published_rating` calls it. The first failing check names the reason:
+
+| Order | Rule | Result |
+|---|---|---|
+| 1 | Not published | `INELIGIBLE_REMOVED` (`INELIGIBLE_REPORTED` while hidden) |
+| 2 | Conflict of interest declared | `INELIGIBLE_CONFLICT` (also for a Guest review) |
+| 3 | Guest review | `INELIGIBLE_GUEST`: counts in Guest Feedback only |
+| 4 | Team account, or no active Verified Member record (none, expired, revoked, not approved) | `INELIGIBLE_UNVERIFIED` |
+| 5 | Visit month in the future, no text, or rating out of range | `INELIGIBLE_INVALID` (new) |
+| 6 | Same author already has a counted review of this destination and month (only possible with `duplicate_override`; the earlier one keeps the count) | `INELIGIBLE_DUPLICATE` |
+| 7 | An open or in-review report with a serious reason (`privacy`, `conflict_of_interest`) | `INELIGIBLE_REPORTED` |
+| 8 | Otherwise | `ELIGIBLE` |
+
+Eligibility is frozen at publication: ordinary verification expiry never uncounts a review (Review.md 6.3).
+
+**`recheck_rating` (`app/services.py`).** Locks the review, then the destination totals; removes the old contribution, re-evaluates, adds the new one. It changes nothing, not even the version, when the answer is unchanged. Serious reports use it: `create_report` uncounts the review and closing the report (`actioned` or `dismissed`) restores it. A report alone never hides the text.
+
+**Verification revoked for abuse (`app/rating_integrity.py`).** `POST /admin/members/{user_id}/verification/revoke` (moderator or superadmin, reason required, never your own account) sets `revoked_at` and `revocation_reason`, then re-checks every counted published review of that author, locking destinations in id order. The reviews stay public; they stop feeding the Community Rating. Audited as `verification.revoke_for_abuse` with the review count; the member gets the new `verification.revoked` notice. A repeat answers `404`. This is the documented exception to the no-full-scan rule and touches one author's reviews only.
+
+**Reconciliation.** `reconcile` recomputes the community, guest and per-category totals of every destination from the review rows and compares them with the stored totals. Detecting never writes. `repair=true` locks each drifting destination, overwrites the totals, bumps the totals version and writes one `ratings.reconcile_repair` audit event with before and after. A review row that contradicts itself (counted while not published, or published and eligible but not counted) is reported, never repaired. Entry points: `python -m app.jobs.reconcile_ratings [--repair]` (exit status 1 on drift), `POST /ops/jobs/rating-reconciliation` (ops token, detect-only), `POST /admin/ratings/reconcile` (superadmin, `{repair}`), and the workflow `.github/workflows/rating-reconciliation.yml` (00:45 Dhaka, calls the ops route). Drift raises one `ratings.drift_detected` notice a day to superadmins. Each run writes a `ratings.reconcile_run` audit event.
+
+**Semester evidence.** `GET /admin/rating-evidence`: active and ever-approved Verified Members, median and maximum approval turnaround in hours, and for each published destination the eligible count and `top_rated` or `seeded`.
+
+**Migration `0019_rating_integrity`.** Adds `INELIGIBLE_INVALID` to `rating_eligibility`. The downgrade maps rows using it to `INELIGIBLE_REMOVED` (PostgreSQL cannot drop an enum value).
+
+**Evidence (31 October 2026).** `tests/test_rating_exclusion.py` (33 tests: formula table, every rule, public feed and totals after hide, reject, withdraw, delete, report and restore, a random-transition property test that reconciles after every step) and `tests/test_rating_integrity.py` (revocation, race with a publish, atomic failure, drift detection, repair, nightly job, evidence, access rules, CSRF, TOTP, ops route). Removing the duplicate or serious-report rule makes three of them fail. Full suite: 287 unit and 272 integration tests, migration round trip and `alembic check` clean. Online project: totals of all five destinations equal a full recomputation and no review row contradicts itself (read-only check). **Migration 0019 is not yet applied online**: it is applied by the container on the next deploy (`alembic upgrade head` at start).
+
+**Not built.** A ranked Top Rated list (discovery, H02); a staff button for revocation (the API is ready); a delete workflow (the `DELETED` state is excluded by the rules and tested).
+
+### 5.22 R11: review reporting, moderation actions and the audit log (1 November 2026)
+
+Inspection found the R10/R11 core already built (35 staff routes, queue, leases, decisions, appeals, audit). R11 therefore closed twelve gaps against `Features/Review.md` 5.4 and the Moderation spec, two of them real defects:
+
+| # | Gap or defect | Fix | Where |
+|---|---|---|---|
+| F1 | 6 report reasons, spec has 9 | Nine reasons plus `removal_request`; `offensive` stored as `harassment`; one list for API, database check, priority, rating rule and labels | `app/report_reasons.py`, migration `0020` |
+| F2 | No anonymous report or lost-receipt removal request | `POST /public/review-reports`, `POST /public/removal-requests`: Origin, Turnstile, durable limits, uniform `202`, keyed digest of the network, contact erased after 30 days | `app/public_reports.py`, `admin/actions.py` |
+| F3 | No quick action on a severe report | `POST /admin/reports/{id}/hide-pending`: a moderator hides a reported review as a takedown case; never automatic | `actions.hide_pending_decision` |
+| F4 | `counts_toward_rating` stored but never read | A takedown can keep the counted rating; changing the flag moves the totals under the usual locks; R08 reconciliation counts "published, or hidden while kept" | `services.set_hidden_rating_kept`, `moderate_review(keep_rating)` |
+| F5 | **A posting restriction did not stop review writes** (only verification) | `ensure_not_restricted` on member review create, edit, media and report | `member_routes.py`, `api.py` |
+| F6 | **An expired sanction kept blocking until the unscheduled job ran** | A sanction is in force only until its end time; a request that meets an expired one ends it and audits `sanction.expired`; daily workflow added | `cases.expire_due_sanctions`, `auth/sessions.py`, `retention.yml` |
+| F7 | Report creation wrote no audit row and had no limit | Audit `report.create`; 20 an hour and 5 per review a day per member | `actions.create_report` |
+| F8 | `moderation_actions` could be changed | `UPDATE`, `DELETE`, `TRUNCATE` refused by trigger, like `audit_events` | migration `0020`, `models.py` |
+| F9 | Audit paging skipped rows with equal timestamps; no range, request id, catalogue or export | Keyset cursor on time and id; filters; `GET /admin/audit-events/actions`; capped, neutralised, audited CSV export | `admin/audit.py` |
+| F10 | No Rejected or Hidden lists, no reopen, rejected text kept forever | Lists with `recoverable_until`; superadmin reopen within 30 days; retention redacts text and media after 30 days unless appealed | `review_lists.py`, `retention.py` |
+| F11 | Free-text reason codes | Server catalogue; strict groups refuse other codes | `app/reasons.py` |
+| F12 | Retention had no schedule | `POST /ops/jobs/retention` and `.github/workflows/retention.yml` | `ops/routes.py` |
+
+**Found while testing.** (a) A staff member refused for their **role** was never audited (the 403 comes from the dependency before the route), against Moderation spec 9; it is now `denied.role` with the route, and repeated denials raise the security alert. (b) A NUL character in a text field made PostgreSQL refuse the value and the API answered `503`; a database data exception now answers `422 VALIDATION_FAILED`. (c) A rating already suspended by an open serious report could not be kept by a takedown; the moderator's explicit choice now wins. (d) R08 tests that built "next month" from the machine's UTC date failed for six hours a day, because the app counts months in Dhaka time; they now use the Dhaka date.
+
+**Rules.** Serious reasons from a member (`privacy`, `safety_misinformation`, `conflict_of_interest`) take the rating out while the report is open; anonymous reports never do. A report never hides a review. `POST /admin/enforcement-cases` now defaults `counts_toward_rating` to `false`. `AUDIT_ACTIONS` (`app/audit_actions.py`) lists every audit action; the test suite fails if code writes one that is not listed, and a test fails if a new state-changing route has no stated audit trail.
+
+**Evidence (1 November 2026).** New tests: `test_reports.py` (59), `test_moderation_actions.py` (45), `test_audit_log.py` (31), `test_restrictions.py` (28), plus updates to the R08, admin, ops and media suites. Mutation checks: removing the restriction check, the member rate limit, the anonymous-source rule or the `moderation_actions` trigger makes tests fail. Backend: 289 unit and 438 integration tests, `alembic upgrade`, `check`, `downgrade` clean. Front end: 109 public and 45 staff tests.
+
+**Deployment.** Migration `0020_reports_mod_audit` adds `reports.source`, `reporter_scope_hash`, `contact`, `severity` (and makes `reporter_user_id` nullable), `reviews.purged_at`, enum value `REOPEN`, indexes and the `moderation_actions` trigger. The container applies it with `alembic upgrade head` before it starts. **Do not start this code against the online database before that migration has run**: every review query reads `reviews.purged_at`. The workflows `retention.yml` and `rating-reconciliation.yml` need the `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` repository secrets.
+
+**Not built.** P-02 (moderators must be Verified Members), P-04 (moderators see each other), P-05 (reopen a rejected verification); a hash chain over the audit log; automatic hiding (declined on purpose, abuse risk).

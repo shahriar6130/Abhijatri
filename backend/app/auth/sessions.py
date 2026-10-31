@@ -140,6 +140,13 @@ def optional_principal(
     claims, access_token = found
     user = provision_user(session, claims)
     if user.status != "active":
+        from app.admin import cases  # noqa: PLC0415 - cases imports this module
+
+        # A suspension whose time has passed ends now, so expiry does not wait for the daily job (P-01).
+        if cases.expire_due_sanctions(session, user.id):
+            session.flush()
+            session.refresh(user)
+    if user.status != "active":
         session.commit()
         raise ApiError("ACCOUNT_DISABLED")
     role = active_role(session, user.id)
@@ -174,17 +181,44 @@ def require_csrf(request: Request, principal: MemberPrincipal) -> Principal:
     return principal
 
 
+def _record_role_denial(session: Session, principal: Principal, request: Request, required: tuple[str, ...]) -> None:
+    """A staff member asked for something their role does not allow: write `denied.role` in its own committed
+    transaction (the request is failing anyway) and let repeated denials raise the security alert. A non-staff
+    caller gets 404 and is not recorded, so the log cannot be filled by strangers probing the routes."""
+    from app.models import AuditEvent  # noqa: PLC0415
+    from app.notify import alerts  # noqa: PLC0415
+
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    try:
+        session.rollback()
+        session.add(
+            AuditEvent(
+                actor_user_id=principal.user.id, actor_role_snapshot=principal.role, action="denied.role", target_type="route",
+                target_id=f"{request.method} {path}"[:64], reason=f"needs {' or '.join(required)}",
+                event_metadata={"required": list(required), "method": request.method, "route": path},
+            )
+        )
+        session.commit()
+        if alerts.check_denials(session, principal.user.id):
+            session.commit()
+    except Exception:  # noqa: BLE001 - the 403 is what the caller needs
+        session.rollback()
+        logger.warning("could not record a denied attempt")
+
+
 def staff_principal(*roles: str):  # type: ignore[no-untyped-def]
     """Dependency factory. Non-staff get 404 (the existence of staff routes is not disclosed, spec 2.4);
     staff of another role get 403. Staff must have passed TOTP (AAL2) as the policy requires."""
 
-    def dependency(request: Request, principal: MemberPrincipal) -> Principal:
+    def dependency(request: Request, principal: MemberPrincipal, session: Annotated[Session, Depends(get_session)]) -> Principal:
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             csrf.check_origin(request)
             csrf.require_valid(request, principal.csrf_binding)
         if principal.role is None:
             raise ApiError("NOT_FOUND")
         if principal.role not in roles:
+            _record_role_denial(session, principal, request, roles)
             raise ApiError("FORBIDDEN")
         settings = get_settings()
         needs_mfa = principal.role == "superadmin" or settings.require_mfa_for_moderators

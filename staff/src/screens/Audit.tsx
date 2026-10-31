@@ -1,25 +1,56 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { getAuditEvents } from '../api';
-import { errorText } from '../logic';
-import type { AuditItem, Lang } from '../types';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { exportAuditCsv, getAuditActions, getAuditEvents, type AuditFilters } from '../api';
+import { auditRange, errorText, isSuperadmin } from '../logic';
+import type { AuditItem, Lang, Role } from '../types';
 import { Notice, makeT } from '../ui';
 
-/** Append-only audit trail (Moderation spec 6.6): filter, page back in time, inspect one event. */
-export function Audit({ lang }: { lang: Lang }) {
+interface FormState {
+  action: string;
+  target_type: string;
+  target_id: string;
+  actor_role: string;
+  request_id: string;
+  fromDay: string;
+  toDay: string;
+}
+
+const EMPTY: FormState = { action: '', target_type: '', target_id: '', actor_role: '', request_id: '', fromDay: '', toDay: '' };
+
+/** The filters the API takes, from what the form holds. Empty fields are left out. */
+export function toFilters(form: FormState): AuditFilters {
+  const filters: AuditFilters = { ...auditRange(form.fromDay, form.toDay) };
+  for (const key of ['action', 'target_type', 'target_id', 'actor_role', 'request_id'] as const) {
+    const value = form[key].trim();
+    if (value) filters[key] = value;
+  }
+  return filters;
+}
+
+/** Append-only audit trail (Moderation spec 6.6): filter, page back in time with a stable cursor, inspect one event, export. */
+export function Audit({ lang, role }: { lang: Lang; role: Role }) {
   const t = makeT(lang);
-  const [filters, setFilters] = useState({ action: '', target_type: '', target_id: '' });
-  const [applied, setApplied] = useState(filters);
+  const [form, setForm] = useState<FormState>(EMPTY);
+  const [applied, setApplied] = useState<AuditFilters>({});
+  const [actions, setActions] = useState<string[]>([]);
   const [items, setItems] = useState<AuditItem[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [open, setOpen] = useState<AuditItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getAuditActions()
+      .then((answer) => setActions(answer.actions))
+      .catch(() => undefined); // the free-text field still works without the list
+  }, []);
 
   const load = useCallback(
-    async (before?: string) => {
+    async (cursor?: string | null) => {
       try {
-        const answer = await getAuditEvents({ ...applied, before });
-        setItems((current) => (before && current ? [...current, ...answer.items] : answer.items));
-        setNext(answer.next_before);
+        const answer = await getAuditEvents(applied, cursor);
+        setItems((current) => (cursor && current ? [...current, ...answer.items] : answer.items));
+        setNext(answer.next_cursor);
         setError(null);
       } catch (failure) {
         setError(errorText(failure, lang));
@@ -34,8 +65,31 @@ export function Audit({ lang }: { lang: Lang }) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    setApplied(filters);
+    setOpen(null);
+    setApplied(toFilters(form));
   };
+
+  const download = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await exportAuditCsv(applied);
+      const url = URL.createObjectURL(new Blob([result.csv], { type: 'text/csv;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'audit-events.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+      setNote(result.truncated ? t(`প্রথম ${result.rows}টি ঘটনা নামানো হয়েছে; আরও আছে। ফিল্টার সংকীর্ণ করুন।`, `The first ${result.rows} events were exported; more match. Narrow the filter.`) : t(`${result.rows}টি ঘটনা নামানো হয়েছে।`, `${result.rows} events exported.`));
+    } catch (failure) {
+      setError(errorText(failure, lang));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const typeOptions = useMemo(() => ['review', 'task', 'report', 'user', 'enforcement_case', 'verification_case', 'appeal', 'destination', 'audit_log'], []);
+  const field = (key: keyof FormState) => (value: string) => setForm({ ...form, [key]: value });
 
   return (
     <div className="queue-layout">
@@ -43,23 +97,57 @@ export function Audit({ lang }: { lang: Lang }) {
         <h2>{t('অডিট লগ', 'Audit log')}</h2>
         <form className="stack" onSubmit={submit}>
           <label htmlFor="f-action">{t('কাজ', 'Action')}</label>
-          <input id="f-action" placeholder="review.publish" value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })} />
+          <input id="f-action" list="audit-actions" placeholder="report.create" value={form.action} onChange={(e) => field('action')(e.target.value)} />
+          <datalist id="audit-actions">
+            {actions.map((action) => (
+              <option key={action} value={action} />
+            ))}
+          </datalist>
           <label htmlFor="f-type">{t('লক্ষ্যের ধরন', 'Target type')}</label>
-          <select id="f-type" value={filters.target_type} onChange={(e) => setFilters({ ...filters, target_type: e.target.value })}>
+          <select id="f-type" value={form.target_type} onChange={(e) => field('target_type')(e.target.value)}>
             <option value="">{t('সব', 'All')}</option>
-            {['review', 'task', 'report', 'user'].map((type) => (
+            {typeOptions.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
             ))}
           </select>
           <label htmlFor="f-target">{t('লক্ষ্যের আইডি', 'Target id')}</label>
-          <input id="f-target" value={filters.target_id} onChange={(e) => setFilters({ ...filters, target_id: e.target.value.trim() })} />
-          <button type="submit" className="primary">
-            {t('ফিল্টার', 'Filter')}
-          </button>
+          <input id="f-target" value={form.target_id} onChange={(e) => field('target_id')(e.target.value.trim())} />
+          <label htmlFor="f-role">{t('কর্তার ভূমিকা', 'Actor role')}</label>
+          <select id="f-role" value={form.actor_role} onChange={(e) => field('actor_role')(e.target.value)}>
+            <option value="">{t('সব', 'All')}</option>
+            <option value="moderator">moderator</option>
+            <option value="superadmin">superadmin</option>
+          </select>
+          <label htmlFor="f-request">{t('অনুরোধ আইডি', 'Request id')}</label>
+          <input id="f-request" value={form.request_id} onChange={(e) => field('request_id')(e.target.value.trim())} />
+          <div className="row">
+            <div className="stack">
+              <label htmlFor="f-from">{t('থেকে', 'From')}</label>
+              <input id="f-from" type="date" value={form.fromDay} max={form.toDay || undefined} onChange={(e) => field('fromDay')(e.target.value)} />
+            </div>
+            <div className="stack">
+              <label htmlFor="f-to">{t('পর্যন্ত', 'To')}</label>
+              <input id="f-to" type="date" value={form.toDay} min={form.fromDay || undefined} onChange={(e) => field('toDay')(e.target.value)} />
+            </div>
+          </div>
+          <div className="row">
+            <button type="submit" className="primary">
+              {t('ফিল্টার', 'Filter')}
+            </button>
+            <button type="button" className="ghost" onClick={() => { setForm(EMPTY); setApplied({}); setOpen(null); }}>
+              {t('মুছুন', 'Clear')}
+            </button>
+            {isSuperadmin(role) && (
+              <button type="button" className="ghost" disabled={busy} onClick={() => void download()}>
+                {t('CSV নামান', 'Export CSV')}
+              </button>
+            )}
+          </div>
         </form>
         {error && <Notice tone="error">{error}</Notice>}
+        {note && <Notice tone="success">{note}</Notice>}
         {items?.length === 0 && <p className="muted">{t('কোনো ঘটনা নেই।', 'No events.')}</p>}
         <ul className="list">
           {items?.map((event) => (

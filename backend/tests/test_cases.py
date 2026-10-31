@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 import test_admin as admin
 import test_auth as support
+from conftest import backdate_decisions
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -310,7 +311,7 @@ def test_appeal_received_independent_review_and_overturn(client: TestClient, pos
 def test_a_late_appeal_is_refused(client: TestClient, postgres_session: Session, fake: support.FakeGoTrue) -> None:
     author = member(client, postgres_session, fake, "author@example.com", "203.0.113.103")
     _, _, action = _rejected_member_review(client, postgres_session, fake, "author@example.com")
-    postgres_session.execute(update(ModerationActionRecord).where(ModerationActionRecord.id == action.id).values(created_at=datetime.now(UTC) - timedelta(days=32)))
+    backdate_decisions(postgres_session, datetime.now(UTC) - timedelta(days=32), id=action.id)
     postgres_session.commit()
     late = author.post("/api/v1/appeals", json={"target_type": "moderation_action", "target_id": str(action.id), "reason": "Please look again at this one."})
     assert late.status_code == 409 and late.json()["error"]["code"] == "APPEAL_WINDOW_CLOSED"

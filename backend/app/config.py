@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     receipt_ops_per_receipt_per_hour: int = Field(default=20, ge=1)
     receipt_ops_per_network_per_hour: int = Field(default=100, ge=1)
     guest_visits_per_network_per_hour: int = Field(default=60, ge=1)
+    # Review reports (Gantt R11): members are accountable, so their limits are looser than anonymous ones.
+    member_report_per_hour: int = Field(default=20, ge=1)
+    member_report_per_review_per_day: int = Field(default=5, ge=1)
+    anon_report_per_network_per_hour: int = Field(default=5, ge=1)
+    anon_report_per_network_per_day: int = Field(default=20, ge=1)
     receipt_failures_short_limit: int = Field(default=5, ge=1)  # per 15 minutes
     receipt_failures_long_limit: int = Field(default=20, ge=1)  # per 24 hours
     guest_pending_per_destination: int = Field(default=50, ge=1)

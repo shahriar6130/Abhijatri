@@ -180,6 +180,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               <Link to="/account/reviews" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
                 {t('আমার রিভিউ', 'My reviews')}
               </Link>
+              <Link to="/account/reports" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
+                {t('আমার রিপোর্ট', 'My reports')}
+              </Link>
               <Link to="/account/appeals" onClick={onClose} className="font-bold text-forest-primary dark:text-neon-lime hover:underline">
                 {t('আপিল', 'Appeals')}
               </Link>

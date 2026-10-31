@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,7 @@ from app.models import (
     VerificationEvidence,
 )
 from app.notify import events
-from app.services import ReviewError, appeal_deadline, moderate_review
+from app.services import ReviewError, appeal_deadline, moderate_review, set_hidden_rating_kept
 from app.storage import ALLOWED_TYPES, MAX_BYTES, StorageClient
 
 APPROVED_EVIDENCE_HOURS = 24  # Security 3.7: evidence is erased within 24 hours of a decision
@@ -97,12 +97,38 @@ def is_verified_member(session: Session, user_id: uuid.UUID) -> bool:
     )
 
 
+def _in_force(moment: datetime) -> Any:
+    """A sanction is in force while it is active and has not reached its end time. One with only a review date
+    (no end time) stays in force until a person reviews it."""
+    return and_(Sanction.state == "active", or_(Sanction.ends_at.is_(None), Sanction.ends_at > moment))
+
+
+def expire_due_sanctions(session: Session, user_id: uuid.UUID | None = None, *, now: datetime | None = None) -> int:
+    """End sanctions whose time has passed (Moderation spec P-01). The daily job sweeps everyone; a request that
+    meets an expired sanction ends it on the spot, so expiry never depends on that job having run."""
+    moment = now or _now()
+    statement = (
+        select(Sanction)
+        .where(Sanction.state == "active", Sanction.ends_at.is_not(None), Sanction.ends_at <= moment)
+        .with_for_update(skip_locked=True)
+    )
+    if user_id is not None:
+        statement = statement.where(Sanction.user_id == user_id)
+    ended = 0
+    for sanction in session.scalars(statement):
+        reverse_sanction(session, None, sanction, expired=True)
+        ended += 1
+    return ended
+
+
 def ensure_not_restricted(session: Session, user_id: uuid.UUID) -> None:
-    """An active posting restriction or suspension blocks member writes (spec 6.4)."""
+    """A posting restriction or suspension in force blocks member writes (spec 6.4)."""
+    if expire_due_sanctions(session, user_id):
+        session.commit()  # the expiry stands even if the request goes on to fail
     restricted = session.scalar(
         select(Sanction.id).where(
             Sanction.user_id == user_id,
-            Sanction.state == "active",
+            _in_force(_now()),
             Sanction.kind.in_(("posting_restriction", "suspension")),
         )
     )
@@ -292,11 +318,13 @@ def evidence_download(
 # =========================================================================================
 
 
-def _hide_review(session: Session, principal: Principal, review: Review, reason_code: str, request_id: str | None) -> None:
+def _hide_review(
+    session: Session, principal: Principal, review: Review, reason_code: str, request_id: str | None, *, keep_rating: bool = False
+) -> None:
     try:
         moderate_review(
             session, review_id=review.id, actor_user_id=principal.user.id, expected_version=review.version,
-            decision=ModerationDecision.HIDE, reason_code=reason_code, note=None, request_id=request_id,
+            decision=ModerationDecision.HIDE, reason_code=reason_code, note=None, request_id=request_id, keep_rating=keep_rating,
         )
     except ReviewError as error:
         raise ApiError("TRANSITION_NOT_ALLOWED" if error.code == "INVALID_TRANSITION" else error.code) from error
@@ -319,7 +347,7 @@ def _set_account_state(session: Session, user_id: uuid.UUID) -> None:
     user = session.get(User, user_id)
     if user is None:
         return
-    suspended = session.scalar(select(Sanction.id).where(Sanction.user_id == user_id, Sanction.state == "active", Sanction.kind == "suspension"))
+    suspended = session.scalar(select(Sanction.id).where(Sanction.user_id == user_id, _in_force(_now()), Sanction.kind == "suspension"))
     user.status = "disabled" if suspended is not None else "active"
     user.disabled_at = _now() if suspended is not None else None
 
@@ -348,7 +376,7 @@ def open_enforcement(
             raise ApiError("SELF_MODERATION_FORBIDDEN")
         if review.status != ReviewStatus.PUBLISHED:
             raise ApiError("TRANSITION_NOT_ALLOWED")
-        _hide_review(session, principal, review, reason_code, request_id)
+        _hide_review(session, principal, review, reason_code, request_id, keep_rating=counts_toward_rating)
         case = EnforcementCase(
             kind="takedown", review_id=review_id, state="taken_down", emergency=emergency, counts_toward_rating=counts_toward_rating,
             follow_up_due_at=now + timedelta(hours=EMERGENCY_FOLLOW_UP_HOURS) if emergency else None,
@@ -446,6 +474,8 @@ def enforcement_action(
             case.state = "removed"
             if counts_toward_rating is not None:
                 case.counts_toward_rating = counts_toward_rating
+                if review is not None:
+                    set_hidden_rating_kept(session, review.id, counts_toward_rating)  # moves the totals under the usual locks
         elif action == "restore":
             assert review is not None
             _restore_review(session, principal, review, reason_code, request_id)

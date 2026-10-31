@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { forgetCsrfToken, getSession, login, logout, register, reportReview, requestPasswordReset, verifyEmail } from './auth';
+import { forgetCsrfToken, getSession, login, logout, register, requestPasswordReset, verifyEmail } from './auth';
+import { reportReview } from './reports';
 
 type Call = [string, RequestInit];
 

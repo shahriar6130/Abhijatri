@@ -9,6 +9,7 @@ submitted values, internal paths, or whether an account exists.
 import logging
 from typing import Any
 
+import psycopg.errors
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -53,6 +54,7 @@ CATALOGUE: dict[str, tuple[int, str, str]] = {
     "RESERVED_DISPLAY_NAME": (409, "এই প্রদর্শন নামটি ব্যবহার করা যাবে না।", "This display name is reserved."),
     "IDEMPOTENCY_KEY_REUSED": (409, "একই কী ভিন্ন অনুরোধে ব্যবহার করা হয়েছে।", "This idempotency key was used with a different request."),
     "DUPLICATE_OPEN_REPORT": (409, "এই রিভিউয়ের জন্য আপনার একটি রিপোর্ট ইতিমধ্যে খোলা আছে।", "You already have an open report on this review."),
+    "REOPEN_WINDOW_CLOSED": (409, "এই রিভিউটি আর পুনরায় খোলা যাবে না।", "This review can no longer be reopened."),
     "APPEAL_WINDOW_CLOSED": (409, "আপিলের সময় শেষ হয়ে গেছে।", "The appeal window has closed."),
     "PAYLOAD_TOO_LARGE": (413, "অনুরোধটি অনেক বড়।", "The request is too large."),
     "TOKEN_INVALID_OR_EXPIRED": (422, "লিংকটি সঠিক নয় বা মেয়াদ শেষ। নতুন লিংক চান।", "The link is not valid or has expired. Request a new one."),
@@ -222,6 +224,10 @@ def install_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(DBAPIError)
     async def database_unavailable(request: Request, error: DBAPIError) -> JSONResponse:
+        if isinstance(error.orig, psycopg.errors.DataError):
+            # PostgreSQL refused the value itself (a NUL character, an out-of-range number): the caller's data, not an outage.
+            logger.info("database refused a value on %s: %s", request.url.path, type(error.orig).__name__)
+            return error_response(request, "VALIDATION_FAILED")
         logger.error("database error on %s", request.url.path, exc_info=error)
         return error_response(request, "SERVICE_UNAVAILABLE", headers={"Retry-After": "5"})
 

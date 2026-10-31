@@ -342,7 +342,7 @@ When unread counts grow slow, add a partial index `(recipient_user_id) WHERE rea
 | P-N1 | Schedule `app/jobs/retention.py` (GitHub Actions cron calling an ops-token job route, like `visit-rollup.yml`) | Without it, notification expiry, outbox cleanup and suspension expiry do not run in production. |
 | P-N2 | Signal-based SSE (Postgres `LISTEN/NOTIFY` or Redis pub/sub) instead of a 2-second poll per stream | Removes the per-tab database load (14.2). |
 | P-N3 | Run the worker as its own process when the API scales out or sleeps | Notices are delayed while a free instance sleeps. |
-| P-N4 | Notices for the Planned moderation items: `content.reopened`, `verification.reopened`, `account.suspension_expired` | Needed once Moderation P-01, P-03 and P-05 exist. |
+| P-N4 | Notices for the Planned moderation items: `content.reopened`, `verification.reopened`, `account.suspension_expired` | Needed once Moderation P-01, P-03 and P-05 exist. `content.reopened` was added with P-03 on 1 Nov 2026; the other two wait for P-05 and a suspension-ended notice (the existing `sanction.ended` event covers the end of a restriction). |
 
 ---
 

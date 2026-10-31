@@ -188,6 +188,26 @@ def guest_visit_checks(settings: Settings, network: bytes) -> list[tuple[Rule, b
     ]
 
 
+def member_report_checks(settings: Settings, member: bytes, member_review: bytes) -> list[tuple[Rule, bytes]]:
+    return [
+        (Rule("member_report:member:1h", HOUR, settings.member_report_per_hour), member),
+        (Rule("member_report:review:24h", DAY, settings.member_report_per_review_per_day), member_review),
+    ]
+
+
+def anonymous_report_checks(settings: Settings, network: bytes) -> list[tuple[Rule, bytes]]:
+    return [
+        (Rule("anon_report:network:1h", HOUR, settings.anon_report_per_network_per_hour), network),
+        (Rule("anon_report:network:24h", DAY, settings.anon_report_per_network_per_day), network),
+    ]
+
+
+def member_key(user_id: uuid.UUID, review_id: uuid.UUID | None = None) -> bytes:
+    """Keyed digest naming a member (and optionally a review) for throttling."""
+    value = str(user_id) if review_id is None else f"{user_id}:{review_id}"
+    return crypto.digest("abhijatri:member-report:v1", crypto.current_key_id(), value)
+
+
 AUTH_LABEL = "abhijatri:auth-identifier:v1"
 
 

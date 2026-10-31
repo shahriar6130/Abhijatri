@@ -6,6 +6,9 @@
   30 days after rejection or withdrawal); a rejected or withdrawn case row goes with them.
 - Notifications: standard ones after 90 days, critical ones after 24 months.
 - Sanctions past their end time expire, with a system audit event.
+- A rejected review's title, body and media are removed 30 days after the rejection unless an appeal is open;
+  `reviews.purged_at` records it and the review can no longer be reopened (Moderation spec P-03).
+- The contact left on an anonymous report or removal request is erased 30 days after the report is closed.
 
 Nothing tied to an open appeal is deleted. `purge_after` only makes a row a candidate: each case is
 locked and the open-appeal check repeated inside that lock immediately before deletion, and creating
@@ -17,7 +20,7 @@ import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app import media
@@ -26,13 +29,20 @@ from app.admin.cases import reverse_sanction
 from app.db import SessionLocal
 from app.models import (
     Appeal,
+    ModerationActionRecord,
+    ModerationDecision,
     Notification,
     OutboxEvent,
+    Report,
+    Review,
+    ReviewMedia,
+    ReviewRevision,
+    ReviewStatus,
     Sanction,
     VerificationCase,
     VerificationEvidence,
 )
-from app.storage import StorageClient, StorageUnavailable, get_storage
+from app.storage import MEDIA_BUCKET, StorageClient, StorageUnavailable, get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +87,77 @@ def purge_verification(sessions: Callable[[], Session], storage: StorageClient, 
                 case.purge_after = None
             session.commit()
     return {"evidence_files": evidence_files, "cases": cases_deleted}
+
+
+REJECTED_REVIEW_DAYS = 30
+CONTACT_DAYS = 30
+REMOVED_TEXT = "[removed]"
+
+
+def purge_rejected_reviews(sessions: Callable[[], Session], storage: StorageClient, now: datetime) -> int:
+    """Redact rejected reviews 30 days after the rejection (Moderation spec P-03). Each review is locked and its
+    open-appeal check repeated inside the lock, so a reopen or an appeal filed meanwhile wins over the purge."""
+    cutoff = now - timedelta(days=REJECTED_REVIEW_DAYS)
+    with sessions() as session:
+        rejected_at = (
+            select(ModerationActionRecord.review_id, func.max(ModerationActionRecord.created_at).label("at"))
+            .where(ModerationActionRecord.decision == ModerationDecision.REJECT)
+            .group_by(ModerationActionRecord.review_id)
+            .subquery()
+        )
+        candidates = list(
+            session.scalars(
+                select(Review.id)
+                .join(rejected_at, rejected_at.c.review_id == Review.id)
+                .where(Review.status == ReviewStatus.REJECTED, Review.purged_at.is_(None), rejected_at.c.at < cutoff)
+            )
+        )
+    purged = 0
+    for review_id in candidates:
+        with sessions() as session:
+            review = session.scalar(select(Review).where(Review.id == review_id).with_for_update(skip_locked=True))
+            if review is None or review.status != ReviewStatus.REJECTED or review.purged_at is not None:
+                continue  # reopened, or purged by another run
+            actions = session.scalars(
+                select(ModerationActionRecord.id).where(ModerationActionRecord.review_id == review.id, ModerationActionRecord.decision == ModerationDecision.REJECT)
+            ).all()
+            if session.scalar(select(Appeal.id).where(Appeal.moderation_action_id.in_(actions), Appeal.state.in_(OPEN_APPEAL))):
+                continue  # preserved while the appeal is open
+            files = list(session.scalars(select(ReviewMedia).where(ReviewMedia.review_id == review.id, ReviewMedia.state != "removed")))
+            keys = [k for item in files for k in (item.quarantine_key, item.processed_key) if k]
+            try:
+                if keys:
+                    storage.delete(keys, MEDIA_BUCKET)
+            except StorageUnavailable:
+                logger.warning("rejected-review media purge postponed: storage unavailable")
+                continue
+            for item in files:
+                item.state = "removed"
+            for revision in session.scalars(select(ReviewRevision).where(ReviewRevision.review_id == review.id)):
+                revision.title, revision.body = REMOVED_TEXT, REMOVED_TEXT
+            review.purged_at = now
+            audit.record(session, actor=None, action="review.purged", target_type="review", target_id=review.id, metadata={"media": len(files)})
+            session.commit()
+            purged += 1
+    return purged
+
+
+def erase_report_contacts(sessions: Callable[[], Session], now: datetime) -> int:
+    """The contact on an anonymous report is kept only for a follow-up: erased 30 days after the report is closed."""
+    with sessions() as session:
+        reports = list(
+            session.scalars(
+                select(Report).where(
+                    Report.contact.is_not(None), Report.state.in_(("actioned", "dismissed")),
+                    Report.resolved_at < now - timedelta(days=CONTACT_DAYS),
+                ).with_for_update(skip_locked=True)
+            )
+        )
+        for report in reports:
+            report.contact = None
+            audit.record(session, actor=None, action="retention.contact_erased", target_type="report", target_id=report.id)
+        session.commit()
+        return len(reports)
 
 
 def purge_notifications(sessions: Callable[[], Session], now: datetime) -> int:
@@ -139,6 +220,8 @@ def run(sessions: Callable[[], Session] = SessionLocal, storage: StorageClient |
     result["notifications"] = purge_notifications(sessions, moment)
     result["outbox_events"] = purge_outbox(sessions, moment)
     result["sanctions_expired"] = expire_sanctions(sessions, moment)
+    result["rejected_reviews"] = purge_rejected_reviews(sessions, store, moment)
+    result["report_contacts"] = erase_report_contacts(sessions, moment)
     return result
 
 

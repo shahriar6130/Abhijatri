@@ -66,6 +66,12 @@ export interface ReportSubject {
   state: 'open' | 'in_review' | 'actioned' | 'dismissed';
   version: number;
   reason_code: string;
+  reason_label?: { bn: string; en: string };
+  /** `member` or `anonymous`; an anonymous report may carry a contact for a follow-up (staff only). */
+  source?: 'member' | 'anonymous';
+  /** 2 for serious reasons (privacy, safety, impersonation, copyright, harassment, removal request), otherwise 1. */
+  priority?: number;
+  contact?: string | null;
   details: string | null;
   review_id: string;
   review_status: string | null;
@@ -73,6 +79,36 @@ export interface ReportSubject {
   review_title: string | null;
   review_body: string | null;
   created_at: string;
+}
+
+export interface ReasonGroup {
+  /** A strict group is enforced by the server: any other code is refused. */
+  strict: boolean;
+  reasons: { code: string; bn: string; en: string }[];
+}
+export type ReasonCatalogue = Record<string, ReasonGroup>;
+
+/** A review in the Rejected or Hidden list (`GET /admin/reviews`). */
+export interface DecidedReview {
+  review_id: string;
+  destination_id: string;
+  status: 'REJECTED' | 'HIDDEN';
+  version: number;
+  author: 'member' | 'guest';
+  title: string;
+  overall_rating: number;
+  counted_rating: number | null;
+  decided_at: string;
+  reason_code: string | null;
+  purged: boolean;
+  /** Only a rejected review whose text still exists has a deadline (30 days). */
+  recoverable_until: string | null;
+}
+
+export interface AuditPage {
+  items: AuditItem[];
+  next_cursor: string | null;
+  next_before: string | null;
 }
 
 export interface QueueItem {

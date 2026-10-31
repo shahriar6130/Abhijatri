@@ -11,6 +11,11 @@ export const COMMUNITY_RATING_THRESHOLD = 5;
 const PRIOR_MEAN = 3.5;
 const PRIOR_WEIGHT = 5;
 
+/** "1 of 5 verified reviews": how many eligible reviews exist toward the threshold of Review.md 6.4. */
+export function seededProgress(count: number): string {
+  return `${Math.min(count, COMMUNITY_RATING_THRESHOLD)} of ${COMMUNITY_RATING_THRESHOLD} verified reviews`;
+}
+
 export function bayesianScore(rating: Rating): number | null {
   if (rating.average === null || rating.count === 0) return null;
   return (rating.average * rating.count + PRIOR_WEIGHT * PRIOR_MEAN) / (rating.count + PRIOR_WEIGHT);
@@ -59,6 +64,13 @@ export const RatingSummary: React.FC<{ community: Rating; guest: Rating; compact
           <ShieldCheck size={13} aria-hidden="true" />
           {/* Review.md 6.4 term; it is editorial, not a community ranking. */}
           {t('সম্পাদকীয় গন্তব্য নির্বাচন', 'Seeded Destination Selection')}
+          {/* The count is always shown (Review.md 6.1), so a reader sees how far the destination is from a rating. */}
+          <span className="opacity-75">
+            {t(
+              `(${formatNumber(Math.min(community.count, COMMUNITY_RATING_THRESHOLD), language)}/${formatNumber(COMMUNITY_RATING_THRESHOLD, language)}টি যাচাইকৃত রিভিউ)`,
+              `(${seededProgress(community.count)})`,
+            )}
+          </span>
         </span>
       )}
 

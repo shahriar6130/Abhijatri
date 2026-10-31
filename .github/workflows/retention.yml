@@ -1,0 +1,30 @@
+name: Daily retention
+
+# Runs the retention sweep (Docs/Moderation-Dashboard-Specification.md 11.3, P-01): decided verification evidence,
+# old notifications and outbox rows, expired sanctions, rejected reviews past 30 days and report contacts.
+# 19:00 UTC = 01:00 Asia/Dhaka. The route is idempotent, and sanction expiry no longer depends on this job
+# (a request that meets an expired sanction ends it), so a missed run delays housekeeping only.
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retention:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the retention sweep
+        env:
+          OPS_API_URL: ${{ secrets.OPS_API_URL }}
+          OPS_DASHBOARD_TOKEN: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+        run: |
+          if [ -z "$OPS_API_URL" ] || [ -z "$OPS_DASHBOARD_TOKEN" ]; then
+            echo "OPS_API_URL / OPS_DASHBOARD_TOKEN secrets are not set; skipping."
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 120 --retry 3 --retry-all-errors \
+            -X POST "${OPS_API_URL%/}/api/v1/ops/jobs/retention" \
+            -H "Authorization: Bearer ${OPS_DASHBOARD_TOKEN}"

@@ -4,6 +4,7 @@ Non-staff callers get 404 (the routes' existence is not disclosed, spec 2.4); st
 get 403. Everything is `no-store`. Writes need a CSRF token; decisions accept an `Idempotency-Key`.
 """
 
+import base64
 import logging
 import uuid
 from collections.abc import Callable
@@ -15,9 +16,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import media
+from app import abuse, media, rating_integrity, reasons, report_reasons, review_lists
+from app.abuse import CounterSessions
 from app.admin import actions, audit, cases, idempotency, roles, tasks
+from app.audit_actions import AUDIT_ACTIONS
 from app.auth.sessions import MemberPrincipal, Principal, require_recent_auth, staff_principal
+from app.config import get_settings
 from app.db import get_session
 from app.errors import ApiError
 from app.models import (
@@ -32,6 +36,7 @@ from app.models import (
     Review,
     ReviewMedia,
     ReviewRevision,
+    ReviewStatus,
     Sanction,
     User,
     UserRole,
@@ -97,13 +102,28 @@ class ReportTransitionBody(_Body):
     lease_token: uuid.UUID
 
 
+class HidePendingBody(_Body):
+    expected_version: int = Field(ge=1)
+    reason_code: str = Field(min_length=2, max_length=60)
+    counts_toward_rating: bool = False
+    task_id: uuid.UUID
+    lease_token: uuid.UUID
+
+
+class ReopenBody(_Body):
+    expected_version: int = Field(ge=1)
+    reason_code: str = Field(min_length=2, max_length=60)
+    note: str | None = Field(default=None, max_length=500)
+
+
 class RoleBody(_Body):
     role: str | None = Field(default=None, pattern="^(moderator|superadmin)$")
     reason: str = Field(min_length=3, max_length=500)
 
 
 class ReportBody(_Body):
-    reason_code: str = Field(pattern="^(spam|offensive|false_information|privacy|conflict_of_interest|other)$")
+    # Validated against app.report_reasons in actions.create_report ("offensive" is accepted and stored as "harassment").
+    reason_code: str = Field(min_length=2, max_length=40)
     details: str | None = Field(default=None, max_length=1000)
 
 
@@ -241,6 +261,10 @@ def _subject_summary(session: Session, task: ModerationTask) -> dict[str, Any] |
             "state": report.state,
             "version": report.version,
             "reason_code": report.reason_code,
+            "reason_label": {"bn": report_reasons.LABELS[report.reason_code][0], "en": report_reasons.LABELS[report.reason_code][1]},
+            "source": report.source,
+            "priority": report.severity,
+            "contact": report.contact,  # personal data: staff only, erased 30 days after the report closes
             "details": report.details,
             "review_id": str(report.review_id),
             "review_status": reported.status.value if reported else None,
@@ -461,6 +485,48 @@ def set_conflict(review_id: uuid.UUID, body: ConflictBody, request: Request, pri
     )
 
 
+class RevokeVerificationBody(_Body):
+    reason_code: str = Field(min_length=2, max_length=60)
+
+
+class ReconcileBody(_Body):
+    repair: bool = False
+
+
+@router.post("/members/{user_id}/verification/revoke")
+def revoke_verification(user_id: uuid.UUID, body: RevokeVerificationBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
+    """End a member's Verified status for abuse and uncount their ratings in one transaction (Review.md 6.3)."""
+    return _run(
+        session, principal, request, "verification.revoke", "user", user_id,
+        lambda: rating_integrity.revoke_verification_for_abuse(
+            session, principal, user_id=user_id, reason_code=body.reason_code, request_id=_request_id(request)
+        ),
+    )
+
+
+@router.post("/ratings/reconcile")
+def reconcile_ratings(body: ReconcileBody, request: Request, principal: Superadmin, session: DbSession) -> dict[str, Any]:
+    """Recompute every destination's totals from the review rows. Detecting never writes; repair is explicit and audited."""
+    def work() -> dict[str, Any]:
+        result = rating_integrity.run_reconciliation(session, repair=body.repair, actor=principal, request_id=_request_id(request))
+        return {
+            "destinations_checked": result.destinations_checked,
+            "repaired": result.repaired,
+            "drifts": [
+                {"destination_id": str(d.destination_id), "kind": d.kind, "key": d.key, "stored": d.stored, "expected": d.expected, "repairable": d.repairable}
+                for d in result.drifts
+            ],
+        }
+
+    return _run(session, principal, request, "ratings.reconcile", "system", "ratings", work)
+
+
+@router.get("/rating-evidence")
+def rating_evidence(principal: Staff, session: DbSession) -> dict[str, Any]:
+    """The semester evidence figures of Review.md 6.4."""
+    return rating_integrity.rating_evidence(session)
+
+
 @router.post("/bulk/moderation-actions")
 def bulk_moderate(body: BulkBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
     """Each item is atomic on its own; the batch may partly succeed (spec 8.4)."""
@@ -491,16 +557,95 @@ def transition_report(report_id: uuid.UUID, body: ReportTransitionBody, request:
     )
 
 
+@router.post("/reports/{report_id}/hide-pending")
+def hide_pending_decision(report_id: uuid.UUID, body: HidePendingBody, request: Request, principal: Staff, session: DbSession) -> dict[str, Any]:
+    """Hide a reported review until a decision is recorded (Review.md 5.4). A moderator's choice, never automatic."""
+    return _run(
+        session, principal, request, "report.hide_pending", "report", report_id,
+        lambda: actions.hide_pending_decision(
+            session, principal, report_id=report_id, expected_version=body.expected_version, reason_code=body.reason_code,
+            counts_toward_rating=body.counts_toward_rating, task_id=body.task_id, lease_token=body.lease_token,
+            request_id=_request_id(request),
+        ),
+    )
+
+
+@router.post("/reviews/{review_id}/reopen")
+def reopen_review(review_id: uuid.UUID, body: ReopenBody, request: Request, principal: Superadmin, session: DbSession) -> dict[str, Any]:
+    """Send a rejected review back to the queue, within 30 days of the rejection (Moderation spec P-03)."""
+    return _run(
+        session, principal, request, "review.reopen", "review", review_id,
+        lambda: actions.reopen_review(
+            session, principal, review_id=review_id, expected_version=body.expected_version, reason_code=body.reason_code,
+            note=body.note, request_id=_request_id(request),
+        ),
+    )
+
+
+@router.get("/reviews")
+def list_reviews_by_status(
+    principal: Staff,
+    session: DbSession,
+    status: Annotated[str, Query(pattern="^(REJECTED|HIDDEN)$")],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    after: Annotated[str | None, Query(max_length=200)] = None,
+) -> dict[str, Any]:
+    """Rejected and Hidden reviews, newest decision first, each with how long it can still be recovered."""
+    del principal
+    return review_lists.list_decided(session, status=ReviewStatus(status), limit=limit, after=after)
+
+
+@router.get("/reason-codes")
+def reason_codes(principal: Staff) -> dict[str, Any]:
+    """The reason codes a decision may carry, with Bangla and English labels. Strict groups refuse anything else."""
+    del principal
+    return {"groups": reasons.catalogue()}
+
+
 @member_router.post("/reviews/{review_id}/reports", status_code=201)
-def report_review(review_id: uuid.UUID, body: ReportBody, principal: MemberPrincipal, request: Request, session: DbSession) -> dict[str, Any]:
+def report_review(
+    review_id: uuid.UUID, body: ReportBody, principal: MemberPrincipal, request: Request, session: DbSession, sessions: CounterSessions
+) -> dict[str, Any]:
     """A signed-in member reports a published review (API.md 4.4)."""
     from app.auth import csrf  # noqa: PLC0415 - a member write needs the same CSRF proof as staff writes
 
     csrf.check_origin(request)
     csrf.require_valid(request, principal.csrf_binding)
+    # Attempts are counted before the work and committed on their own, so a failed report still uses its allowance.
+    abuse.enforce(
+        sessions,
+        abuse.member_report_checks(get_settings(), abuse.member_key(principal.user.id), abuse.member_key(principal.user.id, review_id)),
+    )
     report = _run(session, principal, request, "report.create", "review", review_id,
                   lambda: actions.create_report(session, principal, review_id=review_id, reason_code=body.reason_code, details=body.details))
     return {"report_id": str(report.id), "state": report.state, "version": report.version}
+
+
+@member_router.get("/reports/mine")
+def my_reports(
+    principal: MemberPrincipal,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> dict[str, Any]:
+    """The member's own reports and where each stands. No staff notes, reasons or names are included."""
+    statement = (
+        select(Report).where(Report.reporter_user_id == principal.user.id).order_by(Report.created_at.desc(), Report.id.desc()).limit(limit + 1)
+    )
+    if cursor:
+        moment, identifier = audit.decode_cursor(cursor)
+        statement = statement.where((Report.created_at < moment) | ((Report.created_at == moment) & (Report.id < identifier)))
+    rows = list(session.scalars(statement))
+    more = len(rows) > limit
+    rows = rows[:limit]
+    items = [
+        {"id": str(r.id), "review_id": str(r.review_id), "reason_code": r.reason_code, "state": r.state, "created_at": r.created_at.isoformat()}
+        for r in rows
+    ]
+    next_cursor = None
+    if more and rows:
+        next_cursor = base64.urlsafe_b64encode(f"{rows[-1].created_at.isoformat()}|{rows[-1].id}".encode()).decode().rstrip("=")
+    return {"items": items, "next_cursor": next_cursor}
 
 
 # ---- audit ----
@@ -521,31 +666,87 @@ def _audit_item(event: AuditEvent) -> dict[str, Any]:
     }
 
 
+def _audit_filter(
+    action: str | None, target_type: str | None, target_id: str | None, actor_user_id: uuid.UUID | None,
+    actor_role: str | None, request_id: str | None, since: datetime | None, until: datetime | None,
+) -> audit.AuditFilter:
+    if since is not None and until is not None and since >= until:
+        raise ApiError("VALIDATION_FAILED", field_errors=[{"field": "to", "code": "TOO_SMALL"}])
+    return audit.AuditFilter(
+        action=action or None, target_type=target_type or None, target_id=target_id or None, actor_user_id=actor_user_id,
+        actor_role=actor_role or None, request_id=request_id or None, since=since, until=until,
+    )
+
+
+AuditAction = Annotated[str | None, Query(max_length=80)]
+AuditTargetType = Annotated[str | None, Query(max_length=40)]
+AuditTargetId = Annotated[str | None, Query(max_length=64)]
+AuditRole = Annotated[str | None, Query(pattern="^(moderator|superadmin)$")]
+AuditRequestId = Annotated[str | None, Query(max_length=64)]
+AuditSince = Annotated[datetime | None, Query(alias="from")]
+AuditUntil = Annotated[datetime | None, Query(alias="to")]
+
+
 @router.get("/audit-events")
 def audit_events(
     principal: Staff,
     session: DbSession,
-    action: Annotated[str | None, Query(max_length=80)] = None,
-    target_type: Annotated[str | None, Query(max_length=40)] = None,
-    target_id: Annotated[str | None, Query(max_length=64)] = None,
+    action: AuditAction = None,
+    target_type: AuditTargetType = None,
+    target_id: AuditTargetId = None,
     actor_user_id: uuid.UUID | None = None,
+    actor_role: AuditRole = None,
+    request_id: AuditRequestId = None,
+    since: AuditSince = None,
+    until: AuditUntil = None,
     before: datetime | None = None,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict[str, Any]:
+    """Newest first, filterable, with a keyset cursor (rows sharing a timestamp are never skipped)."""
     del principal
-    statement = select(AuditEvent).order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc()).limit(limit)
-    if action:
-        statement = statement.where(AuditEvent.action == action)
-    if target_type:
-        statement = statement.where(AuditEvent.target_type == target_type)
-    if target_id:
-        statement = statement.where(AuditEvent.target_id == target_id)
-    if actor_user_id:
-        statement = statement.where(AuditEvent.actor_user_id == actor_user_id)
-    if before:
-        statement = statement.where(AuditEvent.occurred_at < before)
-    items = [_audit_item(event) for event in session.scalars(statement)]
-    return {"items": items, "next_before": items[-1]["occurred_at"] if len(items) == limit else None}
+    filters = _audit_filter(action, target_type, target_id, actor_user_id, actor_role, request_id, since, until)
+    rows, next_cursor = audit.search(session, filters, limit=limit, cursor=cursor, before=before)
+    items = [_audit_item(event) for event in rows]
+    # next_before is the older paging form; it can repeat a row that shares a timestamp, so prefer next_cursor.
+    return {"items": items, "next_cursor": next_cursor, "next_before": items[-1]["occurred_at"] if next_cursor else None}
+
+
+@router.get("/audit-events/actions")
+def audit_actions_catalogue(principal: Staff) -> dict[str, Any]:
+    """Every action name the log can hold, for the filter list. A refused attempt is `denied.<action>`."""
+    del principal
+    return {"actions": sorted(AUDIT_ACTIONS), "denied_prefix": "denied."}
+
+
+@router.get("/audit-events/export")
+def export_audit_events(
+    request: Request,
+    principal: Superadmin,
+    session: DbSession,
+    action: AuditAction = None,
+    target_type: AuditTargetType = None,
+    target_id: AuditTargetId = None,
+    actor_user_id: uuid.UUID | None = None,
+    actor_role: AuditRole = None,
+    request_id: AuditRequestId = None,
+    since: AuditSince = None,
+    until: AuditUntil = None,
+) -> Response:
+    """CSV of the matching events (at most 10,000), for superadmins. The export is itself an audit event."""
+    filters = _audit_filter(action, target_type, target_id, actor_user_id, actor_role, request_id, since, until)
+
+    def work() -> tuple[str, int, bool]:
+        body, count, truncated = audit.export_csv(session, filters)
+        audit.record(
+            session, actor=principal, action="audit.exported", target_type="audit_log", target_id="export",
+            metadata={"filters": filters.as_metadata(), "rows": count, "truncated": truncated}, request_id=_request_id(request),
+        )
+        return body, count, truncated
+
+    body, count, truncated = _run(session, principal, request, "audit.export", "audit_log", "export", work)
+    headers = {"Content-Disposition": 'attachment; filename="audit-events.csv"', "X-Row-Count": str(count), "X-Truncated": str(truncated).lower()}
+    return Response(content=body, media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.get("/audit-events/{event_id}")
@@ -658,7 +859,8 @@ class EnforcementBody(_Body):
     reason_code: str = Field(min_length=2, max_length=60)
     note: str | None = Field(default=None, max_length=500)
     emergency: bool = False
-    counts_toward_rating: bool = True
+    # Hidden reviews leave the rating by default (Decisions.md, P-00); keeping it is a deliberate choice.
+    counts_toward_rating: bool = False
     sanction: SanctionBody | None = None
 
 
