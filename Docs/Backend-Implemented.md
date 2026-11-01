@@ -976,3 +976,20 @@ Inspection found the R10/R11 core already built (35 staff routes, queue, leases,
 **Deployment.** Migration `0020_reports_mod_audit` adds `reports.source`, `reporter_scope_hash`, `contact`, `severity` (and makes `reporter_user_id` nullable), `reviews.purged_at`, enum value `REOPEN`, indexes and the `moderation_actions` trigger. The container applies it with `alembic upgrade head` before it starts. **Do not start this code against the online database before that migration has run**: every review query reads `reviews.purged_at`. The workflows `retention.yml` and `rating-reconciliation.yml` need the `OPS_API_URL` and `OPS_DASHBOARD_TOKEN` repository secrets.
 
 **Not built.** P-02 (moderators must be Verified Members), P-04 (moderators see each other), P-05 (reopen a rejected verification); a hash chain over the audit log; automatic hiding (declined on purpose, abuse risk).
+
+**Browser verification on the online database (1 November 2026).** Migrations 0019 and 0020 were applied online (approved by the owner). The local API ran on the online settings; the public app was tested as a Verified Member and signed out, the staff app as the online superadmin (TOTP verified).
+
+| Area | Checked | Result |
+|---|---|---|
+| R08 | Seeded label below five eligible reviews, with the count, in English and Bangla; no score from one review; per-category counts | Pass (count added to the label) |
+| R08 | Reconciliation on real data (detect-only) and semester evidence | Pass: 5 destinations, no drift |
+| R11 member | Nine reasons; own review refused; report sent; duplicate refused; My reports | Pass |
+| R11 guest | Contact field and privacy note; invalid contact refused; report sent; removal request with field errors and focus | Pass |
+| R11 data | Source, priority, contact only where given, audit rows without personal data | Pass |
+| R11 staff | Queue order by priority; report detail with priority, source and staff-only contact; hide pending with the rating kept; restore; Rejected list with countdowns and Reopen; Hidden list; audit filters, paging, detail; Bangla; no console errors | Pass |
+| Access | Staff app for an account without a role shows only "no staff role" | Pass |
+
+**Fixed during this run:** the frontend CI build failed on a strict type error in the removal form's focus handling; the seeded label now shows "1 of 5 verified reviews" instead of hiding it in a tooltip; the removal form moves focus to the first field to fix; the staff tab bar now wraps (the new tab caused sideways scrolling); queue rows show the report reason and a High priority tag; restoring a review from a report or the queue now closes the takedown case that hid it (it stayed `taken_down`); the staff takedown form now starts with "Still counts towards ratings" unticked, matching the server default.
+
+**Not exercised in the browser:** Hide pending without keeping the rating, Reopen, Dismiss and the CSV export on the online data: further staff writes to shared online data need the owner's go-ahead. All are covered by the automated tests. The browser's public cache (`max-age=60`) can show a just-hidden review to a visitor for up to a minute.
+

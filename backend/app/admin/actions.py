@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import media, reasons, report_reasons
 from app.admin import audit, tasks
-from app.admin.cases import ensure_not_restricted, open_enforcement
+from app.admin.cases import close_takedowns_on_restore, ensure_not_restricted, open_enforcement
 from app.auth.sessions import Principal
 from app.eligibility import SERIOUS_REPORT_REASONS
 from app.errors import ApiError
@@ -84,6 +84,8 @@ def moderate_submission(
     except ReviewError as error:
         raise translate(error) from error
     decided_media = media.apply_decision(session, review_id, decision, principal.user.id, rejected_media_ids or set())
+    if decision == ModerationDecision.RESTORE:
+        close_takedowns_on_restore(session, principal, review_id, reason_code, request_id)
     if task.task_type == "review_moderation":  # a report task stays open until the report itself is resolved
         tasks.complete(task)
     audit.record(

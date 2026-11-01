@@ -747,3 +747,25 @@ def test_the_staff_app_built_in_reason_lists_match_the_servers_catalogue() -> No
     from app import report_reasons
 
     assert set(re.findall(r"\n  (\w+): \{ bn:", labels)) == set(report_reasons.ALL_STORED) | {"offensive"}
+
+
+
+def test_restoring_from_the_report_closes_the_takedown_it_opened(client: TestClient, postgres_session: Session, fake: support.FakeGoTrue, moderator: User) -> None:
+    """Found in the browser: a hide-pending takedown stayed open as taken_down after the review was restored."""
+    session = postgres_session
+    review, report, staff, task, lease = _reported(client, session, fake, moderator, 40, reason="spam")
+    case_id = _hide(staff, report, task, lease, counts_toward_rating=True).json()["case_id"]
+    session.expire_all()
+    hidden = session.get(Review, review.id)
+    assert hidden is not None
+    restored = staff.post(
+        f"{BASE}/submissions/{review.id}/moderation-actions",
+        json=admin._decision(task, lease["lease_token"], hidden, decision="RESTORE"),  # noqa: SLF001
+    )
+    assert restored.status_code == 200
+    session.expire_all()
+    case = session.get(EnforcementCase, uuid.UUID(case_id))
+    assert case is not None and case.state == "restored" and case.closed_at is not None and case.counts_toward_rating is True
+    event = session.scalar(select(AuditEvent).where(AuditEvent.action == "enforcement.restore"))
+    assert event is not None and event.target_id == case_id and event.event_metadata["via"] == "review.restore"
+    assert reconcile(session).clean

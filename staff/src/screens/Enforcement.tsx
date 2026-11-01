@@ -21,7 +21,8 @@ export function Enforcement({ lang, role }: { lang: Lang; role: Role }) {
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [emergency, setEmergency] = useState(false);
-  const [counts, setCounts] = useState(true);
+  // Hidden reviews leave the rating unless the moderator decides otherwise (Decisions.md, P-00); the server defaults to false too.
+  const [counts, setCounts] = useState(false);
   const [sanction, setSanction] = useState<SanctionKind>('none');
   const [days, setDays] = useState(7);
   const [message, setMessage] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);

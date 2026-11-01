@@ -39,11 +39,14 @@ export const RemovalRequestForm: React.FC = () => {
     if (TURNSTILE_SITE_KEY && !token) next.turnstile = t('নিরাপত্তা যাচাই সম্পূর্ণ করুন।', 'Complete the security check.');
     setErrors(next);
     setFormError(null);
-    const first = ['reviewId', 'statement', 'contact'].find((key) => next[key]);
-    if (first) {
-      // Move focus to the first field to fix, as the other forms do, so keyboard and screen-reader users land on it.
-      document.getElementById({ reviewId: 'removal-review-id', statement: 'removal-statement', contact: 'removal-contact' }[first])?.focus();
-    }
+    // Move focus to the first field to fix, as the other forms do, so keyboard and screen-reader users land on it.
+    const fieldIds: [string, string][] = [
+      ['reviewId', 'removal-review-id'],
+      ['statement', 'removal-statement'],
+      ['contact', 'removal-contact'],
+    ];
+    const first = fieldIds.find(([key]) => next[key]);
+    if (first) document.getElementById(first[1])?.focus();
     if (Object.keys(next).length > 0) return;
     setBusy(true);
     try {

@@ -179,6 +179,12 @@ export function Queue({ lang, role, userId }: Props) {
                   <span className="item-title">{itemTitle(item, t)}</span>
                   <span className="row small muted">
                     <span className="tag">{t(...TYPE_LABEL[item.task_type])}</span>
+                    {item.subject?.kind === 'report' && (
+                      <>
+                        {(item.subject.priority ?? 1) >= 2 && <span className="tag warn">{t('জরুরি', 'High priority')}</span>}
+                        <span className="tag">{reportReasonText(item.subject, lang)}</span>
+                      </>
+                    )}
                     {item.escalated && <span className="tag warn">{t('উপরে পাঠানো', 'Escalated')}</span>}
                     {lease ? (
                       <span className="tag ok">{t('আপনার দখলে', 'Yours')} {formatCountdown(secondsLeft(lease.expiresAt, now))}</span>
@@ -214,6 +220,12 @@ export function Queue({ lang, role, userId }: Props) {
       </section>
     </div>
   );
+}
+
+/** The reason of a report in the reader's language: the server's label, else the built-in one, else the code. */
+export function reportReasonText(subject: ReportSubject, lang: Lang): string {
+  const label = subject.reason_label ?? REPORT_REASONS[subject.reason_code];
+  return label ? (lang === 'bn' ? label.bn : label.en) : subject.reason_code;
 }
 
 function itemTitle(item: QueueItem, t: (bn: string, en: string) => string): string {
