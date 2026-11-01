@@ -721,8 +721,45 @@ def test_app_mode_answers_the_same_for_existing_and_unknown_addresses(client: Te
     unknown_reset = client.post("/api/v1/auth/password-reset/request", json={"email": "ghost@example.com"})
     known_reset = client.post("/api/v1/auth/password-reset/request", json={"email": "taken@example.com"})
     assert unknown_reset.json() == known_reset.json() == {"status": "reset_sent"}
-    assert [e.to for e in app_mail.sent] == ["taken@example.com"], "only the real account gets the reset email"
-    assert "reset-password?token_hash=" in app_mail.sent[0].text
+    assert [e.to for e in app_mail.sent] == ["taken@example.com", "taken@example.com"], "only the real account gets mail"
+    assert "already have an account" in app_mail.sent[0].text.lower()
+    assert "reset-password?token_hash=" in app_mail.sent[1].text
+
+
+@pytest.mark.integration
+def test_signing_up_with_a_taken_address_tells_the_owner_by_email(client: TestClient, fake: FakeGoTrue, app_mail: Any) -> None:
+    fake.add_user("owner@example.com")  # confirmed account
+    new = client.post("/api/v1/auth/register", json={"email": "fresh@example.com", "password": PASSWORD, "display_name": "Fresh"})
+    taken = client.post("/api/v1/auth/register", json={"email": "Owner@Example.com", "password": PASSWORD, "display_name": "Someone"})
+    assert new.status_code == taken.status_code == 202 and new.json() == taken.json(), "the form answers the same"
+    notice = [e for e in app_mail.sent if e.to == "owner@example.com"]
+    assert len(notice) == 1 and "already have an Abhijatri account" in notice[0].subject
+    assert "/login" in notice[0].text and "/forgot-password" in notice[0].text
+    assert PASSWORD not in notice[0].text and PASSWORD not in notice[0].html, "the typed password is never echoed"
+    assert "token_hash" not in notice[0].text, "no sign-in token in a notice anyone can trigger"
+
+
+@pytest.mark.integration
+def test_the_taken_address_notice_is_limited_per_day_and_silently(client: TestClient, fake: FakeGoTrue, app_mail: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXISTING_ACCOUNT_NOTICES_PER_EMAIL_PER_DAY", "2")
+    monkeypatch.setenv("REGISTER_PER_NETWORK_PER_HOUR", "50")
+    get_settings.cache_clear()
+    fake.add_user("flooded@example.com")
+    answers = [client.post("/api/v1/auth/register", json={"email": "flooded@example.com", "password": PASSWORD, "display_name": "X"}) for _ in range(4)]
+    assert {a.status_code for a in answers} == {202} and len({a.text for a in answers}) == 1, "going over the limit is silent"
+    assert len([e for e in app_mail.sent if e.to == "flooded@example.com"]) == 2
+
+
+@pytest.mark.integration
+def test_supabase_mode_sends_no_notice_from_this_api(client: TestClient, fake: FakeGoTrue, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.auth import mail
+    from app.notify.providers import RecordingProvider
+
+    provider = RecordingProvider()
+    monkeypatch.setattr(mail, "get_provider", lambda: provider)
+    fake.add_user("owner2@example.com")
+    assert client.post("/api/v1/auth/register", json={"email": "owner2@example.com", "password": PASSWORD, "display_name": "Y"}).status_code == 202
+    assert provider.sent == [], "with AUTH_EMAIL_DELIVERY=supabase the provider handles account mail"
 
 
 @pytest.mark.integration

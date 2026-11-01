@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     login_attempts_per_network_per_hour: int = Field(default=100, ge=1)
     register_per_network_per_hour: int = Field(default=10, ge=1)
     reset_requests_per_email_per_hour: int = Field(default=3, ge=1)
+    # "You already have an account" notices to one address per day, so a sign-up form cannot flood an inbox.
+    existing_account_notices_per_email_per_day: int = Field(default=3, ge=1)
     reset_requests_per_network_per_hour: int = Field(default=30, ge=1)
     token_confirms_per_network_per_hour: int = Field(default=30, ge=1)
 

@@ -6,7 +6,9 @@ after the response is returned, so a known and an unknown address answer in the 
 is never logged.
 """
 
+import hashlib
 import logging
+from datetime import UTC, datetime
 from html import escape
 from urllib.parse import quote
 
@@ -56,6 +58,25 @@ def reset_email(to: str, token_hash: str) -> Email:
         _link("reset-password", token_hash, "recovery"),
         "If you did not ask for this, ignore this email; your password is unchanged.", "আপনি না চাইলে উপেক্ষা করুন; পাসওয়ার্ড বদলায়নি।",
         f"reset-{token_hash[:16]}",
+    )
+
+
+def existing_account_email(to: str) -> Email:
+    """Someone signed up with an address that already has an account. Only the inbox owner reads this, so it tells
+    them without telling the person at the form (who sees the usual "check your email")."""
+    base = get_settings().frontend_base_url.rstrip("/")
+    return _email(
+        to,
+        "You already have an Abhijatri account / আপনার ইতিমধ্যে একটি অভিযাত্রী অ্যাকাউন্ট আছে",
+        "You already have an account", "আপনার ইতিমধ্যে অ্যাকাউন্ট আছে",
+        "Someone, probably you, tried to sign up with this email address, which already has an account. Sign in instead. "
+        f"If you forgot your password, reset it here: {base}/forgot-password",
+        "এই ইমেইলে ইতিমধ্যে একটি অ্যাকাউন্ট আছে, তাই নতুন করে খোলা যায়নি। সাইন ইন করুন; "
+        f"পাসওয়ার্ড ভুলে গেলে এখানে রিসেট করুন: {base}/forgot-password",
+        f"{base}/login",
+        "If this was not you, you can ignore this email; nothing changed on your account.",
+        "আপনি না করলে এই ইমেইলটি উপেক্ষা করুন; আপনার অ্যাকাউন্টে কিছু বদলায়নি।",
+        f"existing-{hashlib.sha256(to.encode()).hexdigest()[:16]}-{datetime.now(UTC).date().isoformat()}",
     )
 
 

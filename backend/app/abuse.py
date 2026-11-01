@@ -224,6 +224,10 @@ def token_confirm_checks(settings: Settings, network: bytes) -> list[tuple[Rule,
     return [(Rule("auth_token:network:1h", HOUR, settings.token_confirms_per_network_per_hour), network)]
 
 
+def existing_account_notice_rule(settings: Settings) -> Rule:
+    return Rule("auth_existing_notice:email:24h", DAY, settings.existing_account_notices_per_email_per_day)
+
+
 def reset_request_checks(settings: Settings, email: bytes, network: bytes) -> list[tuple[Rule, bytes]]:
     return [
         (Rule("auth_reset:email:1h", HOUR, settings.reset_requests_per_email_per_hour), email),

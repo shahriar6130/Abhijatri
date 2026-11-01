@@ -186,6 +186,12 @@ def register(
         if "rate_limit" in error.code:
             raise ApiError("RATE_LIMITED", headers={"Retry-After": "60"}) from error
         logger.info("sign-up refused by the provider (%s)", error.code)  # an existing address looks the same
+        if error.code == "email_exists" and _app_mail():
+            # The owner of the address is told by email; the form answers exactly as for a new address. A few notices
+            # a day at most, counted before sending, and going over the limit is silent so it reveals nothing.
+            _, over_limit = abuse.hit(sessions, abuse.existing_account_notice_rule(settings), abuse.email_key(email))
+            if over_limit is None:
+                background.add_task(mail.deliver, mail.existing_account_email(email))
     return {"status": "verification_sent"}
 
 
