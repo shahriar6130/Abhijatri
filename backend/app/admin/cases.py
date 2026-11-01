@@ -330,6 +330,29 @@ def _hide_review(
         raise ApiError("TRANSITION_NOT_ALLOWED" if error.code == "INVALID_TRANSITION" else error.code) from error
 
 
+def close_takedowns_on_restore(session: Session, principal: Principal, review_id: uuid.UUID, reason_code: str, request_id: str | None) -> int:
+    """A review restored from the queue or a report is no longer taken down: its open takedown cases end as
+    ``restored`` (counted again, closed, audited), so the Enforcement screen never shows a stale takedown."""
+    ended = 0
+    for case in session.scalars(
+        select(EnforcementCase)
+        .where(EnforcementCase.review_id == review_id, EnforcementCase.kind == "takedown", EnforcementCase.state == "taken_down")
+        .with_for_update()
+    ):
+        previous = case.state
+        case.state, case.counts_toward_rating, case.closed_at = "restored", True, _now()
+        case.version += 1
+        case.updated_at = _now()
+        for task in session.scalars(select(ModerationTask).where(ModerationTask.subject_id == case.id, ModerationTask.status == "open").with_for_update()):
+            tasks.complete(task)
+        audit.record(
+            session, actor=principal, action="enforcement.restore", target_type="enforcement_case", target_id=case.id, reason=reason_code,
+            metadata={"from": previous, "to": case.state, "via": "review.restore", "review_id": str(review_id)}, request_id=request_id,
+        )
+        ended += 1
+    return ended
+
+
 def _restore_review(session: Session, principal: Principal, review: Review, reason_code: str, request_id: str | None) -> None:
     if review.status != ReviewStatus.HIDDEN:
         return

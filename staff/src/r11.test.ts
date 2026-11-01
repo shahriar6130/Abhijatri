@@ -201,3 +201,14 @@ describe('hide pending a decision, the lists and reopen', () => {
     await expect(reopenReview('rev-9', { expectedVersion: 3, reasonCode: 'rejected-in-error' })).rejects.toMatchObject({ code: 'REOPEN_WINDOW_CLOSED', status: 409 });
   });
 });
+
+describe('queue row reason text', () => {
+  const base = { kind: 'report' as const, report_id: 'r', state: 'open' as const, version: 1, details: null, review_id: 'v', review_status: 'PUBLISHED', review_version: 1, review_title: 't', review_body: 'b', created_at: '' };
+  it('uses the server label, then the built-in one, then the code', async () => {
+    const { reportReasonText } = await import('./screens/Queue');
+    expect(reportReasonText({ ...base, reason_code: 'privacy', reason_label: { bn: 'ব্যক্তিগত', en: 'Server privacy' } }, 'en')).toBe('Server privacy');
+    expect(reportReasonText({ ...base, reason_code: 'privacy', reason_label: { bn: 'ব্যক্তিগত', en: 'Server privacy' } }, 'bn')).toBe('ব্যক্তিগত');
+    expect(reportReasonText({ ...base, reason_code: 'removal_request' }, 'en')).toBe('Removal request');
+    expect(reportReasonText({ ...base, reason_code: 'brand_new_code' }, 'en')).toBe('brand_new_code');
+  });
+});
