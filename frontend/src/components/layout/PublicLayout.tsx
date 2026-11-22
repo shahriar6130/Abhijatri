@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import { LoadingState } from '../common/StatusViews';
 import { Compass } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -7,16 +7,12 @@ import { PreferenceToggles } from './PreferenceToggles';
 import { NetworkBanner, SessionExpiredBanner } from '../common/StatusBanners';
 import { PackNotices } from '../offline/PackNotices';
 
-/** Shell for pages outside the app (landing, sign-in): brand, preferences, no sidebar. */
+/** Shell for public pages outside the app and the entry frame (now the privacy notice): brand, preferences, no sidebar. */
 export const PublicLayout: React.FC = () => {
   const { t } = useLanguage();
-  // The front page carries its own brand, menu and switches inside its frame (UI refresh, 22 Nov 2026).
-  const landing = useLocation().pathname === '/';
 
   return (
-    // The front page is exactly one screen high (owner, 22 Nov 2026): nothing scrolls.
-    <div className={`${landing ? 'h-dvh overflow-hidden' : 'min-h-screen'} flex flex-col text-on-surface dark:text-on-dark`}>
-      {!landing && (
+    <div className="min-h-screen flex flex-col text-on-surface dark:text-on-dark">
       <header className="w-full bg-background/80 border-b border-surface-muted/30 dark:border-dark-surface-2">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           <Link to="/" className="flex items-center gap-2.5" aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')}>
@@ -28,26 +24,22 @@ export const PublicLayout: React.FC = () => {
           <PreferenceToggles />
         </div>
       </header>
-      )}
 
       <NetworkBanner />
       <SessionExpiredBanner />
         <PackNotices />
-      <main className={`flex-1 w-full ${landing ? 'min-h-0' : ''}`}>
+      <main className="flex-1 w-full">
         <Suspense fallback={<LoadingState />}>
             <Outlet />
           </Suspense>
       </main>
 
-      {/* The front page has no footer (owner, 22 Nov 2026). */}
-      {!landing && (
       <footer className="bg-background/80 border-t border-surface-muted/30 dark:border-dark-surface-2">
-        <div className={`max-w-6xl mx-auto px-4 sm:px-6 py-5 text-xs text-on-surface-variant dark:text-on-dark-muted flex flex-wrap gap-x-4 gap-y-1 justify-between`}>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 text-xs text-on-surface-variant dark:text-on-dark-muted flex flex-wrap gap-x-4 gap-y-1 justify-between">
           <span>{t('অভিযাত্রী: বাংলাদেশ ভ্রমণের বাংলা-প্রথম সঙ্গী', 'Abhijatri: a Bangla-first travel companion for Bangladesh')}</span>
           <span>{t('জরুরি প্রয়োজনে ৯৯৯-এ কল করুন', 'In an emergency, call 999')}</span>
         </div>
       </footer>
-      )}
     </div>
   );
 };

@@ -501,6 +501,12 @@ Owner request; Decisions 2026-11-22. Approved by the owner and on `abd` (22 Nov 
 
 Revised the same day (owner): no search, menu, greeting, tabs or cards; guest and member choice moved into the right panel; no controls in the hero (Decisions 2026-11-22). Evidence after the revision: types clean, 241 tests pass, build clean; main JavaScript 107.2 KB gzip (110.5 before the refresh), CSS 13.1 KB (14.1); with motion allowed the place under the photo went Cox's Bazar, Sajek Valley, Sylhet at 0, 8 and 15 s; no sideways scrolling at 1440, 1280, 390 and 360 px in both themes. Before the revision: Headless Chrome driven over the DevTools protocol, with a local stand-in that serves only the five seeded destination names and regions (the live API answered 404 "Application not found" that day): the front page at 1440 and 1280 px (light, dark, Bangla, English) and at 390 and 360 px (light and dark) had no sideways scrolling, five cards and five tabs; the Destinations page at the same sizes had no sideways scrolling. **Not checked:** the slider moving (screenshots used reduced motion), keyboard and screen reader, a real phone, the pages that need the API (destination detail, reviews, account).
 
+## 5t. Account pages slide in from the front page (22 November 2026)
+
+Owner request; Decisions 2026-11-22 ("Account pages slide in"). `pages/LandingPage.tsx` became `components/layout/EntryLayout.tsx`, the layout route for `/` and the six account pages; `PublicLayout` now serves only `/privacy`. The account pages themselves are unchanged and render in the form side.
+
+Evidence (22 Nov 2026): types clean, 241 tests pass, build clean. Headless Chrome over the DevTools protocol, measured positions of the three sides: at 1440 x 900, front page hero at 0 and choice at 835 px; after Sign in the hero at -835, choice at 0, form at 605 and `/login` with the form's heading; Back returned to the start positions; Continue as guest then reached `/guest` at the same positions; `/register` opened directly in dark mode at 1366 x 768; on a 390 px phone the switch, Sign in and Back moved hero, choice and form one screen at a time. The side not on screen was `inert` each time; nothing scrolled. Found and fixed during the check: the guest name field focuses itself, which scrolled the row sideways while it slid in (the row now uses `overflow: clip`). **Not checked:** a real phone, a screen reader, signing in or entering a guest name for real (the live API is down).
+
 ## 6. Defects found, reported to their owners, not fixed here
 
 | # | Finding | Owner | Detail |

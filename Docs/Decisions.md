@@ -500,3 +500,13 @@ Amends the 2026-11-04 theme decision. Built on a separate branch, approved by th
 **Revised again (owner, 22 Nov 2026):** no outer frame. The hero fills the left side of the screen edge to edge (full height, stays in place while the right side scrolls; full width with a rounded bottom on phones), and the right side sits directly on the page with the language and theme switches at its top right. The two subtitles ("No account and no personal details needed.", "Everything a guest can do, and more.") are removed.
 
 **Revised again (owner, 22 Nov 2026):** the front page has no footer and is exactly one screen high: nothing scrolls. On a computer (from 1024 px wide) the hero and the right side share the screen, and the headline, text and spacing shrink with the screen height (headline 60 px at 1080 px high, 45 px at 700 px). On a phone one side is shown at a time; a switch at the bottom ("পরিচিতি / About" and "শুরু করুন / Get started") slides between them, and the side slid away cannot be reached with the keyboard or a screen reader. The emergency number 999 was in that footer; it remains on every destination page's emergency contacts.
+
+## 2026-11-22 (Account pages slide in from the front page)
+
+| Decision | Choice | Reason |
+|---|---|---|
+| One frame | The front page and the account pages (`/guest`, `/login`, `/register`, `/verify-email`, `/forgot-password`, `/reset-password`) share one layout, `EntryLayout`: a row of three sides, photo hero, guest or member choice, account form. The privacy notice keeps the plain public layout. | Owner request (22 Nov 2026): choosing a way in should move the page, not reload it. |
+| Computer | Front page: hero and choice. An account page: the hero slides out to the left, the choice moves into the left half with the chosen option highlighted, and the form slides in from the right. Back (or the brand) plays it in reverse. | Owner choice (22 Nov 2026). |
+| Phone | One side at a time. The front page switch moves between hero and choice; an account page slides its form in full screen with "Back" at the top, which returns to the choice. | Owner choice (22 Nov 2026). |
+| Green background | Behind the form side only: the moving pale-mint (light) or deep-green (dark) gradient the app had before (`components/ui/velaris.tsx`, restored). One still frame on low-end devices, for reduced motion, and while the front page shows. | Owner request: "the greenish gradient color it had before". The 2026-11-22 palette entry removed it app-wide; this brings it back for the account screens only. |
+| Sign-up link | The member option has "No account yet? Create one" (to `/register`). | Owner: the left side offers guest, sign in and sign up. |
