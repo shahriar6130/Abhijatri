@@ -262,7 +262,7 @@ Evidence: `tsc -b` clean, 123 tests pass, build clean. Browser (stubbed API): la
 
 ## 5f. App-wide animated background (6 November 2026)
 
-**Removed 22 Nov 2026 on `ui-refresh`** (section 5s): the page sits on the plain background colour.
+**Removed 22 Nov 2026** (section 5s): the page sits on the plain background colour.
 
 `frontend/src/components/ui/velaris.tsx` (adapted from the 21st.dev "Velaris" WebGL gradient) is the background of the whole app. `components/layout/AppBackground.tsx` mounts it once at the app root as a fixed, full-screen layer behind everything (`aria-hidden`), so it keeps running across page changes. The layouts no longer paint their own background; the top bars and sidebar are 80 to 90 percent opaque (no blur) and cards stay solid.
 
@@ -486,9 +486,9 @@ Fifth requested Phase 1 update (`Handoff-Phase1-Updates.md`; Decisions 2026-11-1
 
 Evidence (11 Nov 2026): `tsc -b` clean, 46 staff tests pass, `vite build` clean. Chrome with a local stand-in for the API that returns a made-up signed-in session and empty lists (no real account, no real data): at 1536 px the menu was open with ten sections for a superadmin, choosing Inbox changed the screen and the top bar and kept the menu open, and the button closed it; at 390 px (in a frame) the menu started closed, opened as an overlay with focus on the current section, and closed on Escape, on the backdrop and on a choice, each time returning focus to the button; no sideways scrolling at either width. **Not checked:** with a real staff sign-in and real data, the moderator role (fewer sections), Bangla, a real phone, a screen reader. **Not done:** the bundle served at `/staff` was not rebuilt (P5).
 
-## 5s. UI refresh: palette and front page (22 November 2026, branch `ui-refresh`)
+## 5s. UI refresh: palette and front page (22 November 2026)
 
-Owner request; Decisions 2026-11-22. Not merged: it is on `ui-refresh`, and `git diff ui-baseline ui-refresh -- frontend` shows every change.
+Owner request; Decisions 2026-11-22. Approved by the owner and on `abd` (22 Nov 2026), not deployed yet. `git diff ui-baseline abd -- frontend` shows every change.
 
 | Item | Files |
 |---|---|

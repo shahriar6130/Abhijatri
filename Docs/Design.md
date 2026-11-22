@@ -23,7 +23,7 @@ For nighttime expedition planning, it features an electric **Neon Slate Night Mo
 
 ## 2. Color Palettes
 
-> **Superseded again 22 Nov 2026** (Decisions 2026-11-22, branch `ui-refresh`): white and near-black with one grass green accent; red and amber for alerts only. The tokens are in `frontend/src/global.css`.
+> **Superseded again 22 Nov 2026** (Decisions 2026-11-22): white and near-black with one grass green accent; red and amber for alerts only. The tokens are in `frontend/src/global.css`.
 >
 > **Superseded 4 Nov 2026** (Decisions, "shadcn/ui, Tailwind 4 and a new theme"). The live theme is shadcn/ui stone with a green primary, defined as CSS variables in `frontend/src/global.css`: light background white, text stone-950, primary green-700 (#15803d-equivalent, 5.0:1 with white), borders stone-200; dark background stone-950, cards stone-900, primary green-500 with near-black text. Fonts: Inter (interface, English) and Hind Siliguri (Bangla). Components come from shadcn/ui (`src/components/ui/`) with 44 px minimum targets. The palettes below are kept for history only.
 

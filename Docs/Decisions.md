@@ -483,7 +483,7 @@ Owner request: a user should not have to search for a review by its review ID an
 | Verified Member badge | The badge (`/auth/session` `verified_member`) and `/verifications/mine` count a member as verified only with an active approval **and** the identity details of an approved application (`verification_attributes`), the same rule as Tours. An approval without them shows state `incomplete` and the member may apply again. | Owner report: the sidebar showed "Verified Member ✓" while Tours said "not verified" and a new application was refused as `ALREADY_VERIFIED`. The Community Rating rule (`eligibility.py`) is unchanged for now. |
 
 ## 2026-11-22 (UI refresh: two dominant colours and one accent; new front page)
-Amends the 2026-11-04 theme decision. Work is on the branch `ui-refresh` (baseline tag `ui-baseline`) until the owner approves it.
+Amends the 2026-11-04 theme decision. Built on a separate branch, approved by the owner and moved into `abd` on 22 Nov 2026; the local tag `ui-baseline` marks the code before it.
 
 | Decision | Choice | Reason |
 |---|---|---|
