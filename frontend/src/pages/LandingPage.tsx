@@ -17,7 +17,6 @@ import { useSession } from '../context/SessionContext';
 import { ImageCredit } from '../components/common/ImageCredit';
 import { PreferenceToggles } from '../components/layout/PreferenceToggles';
 import { allDestinationImages } from '../data/destinationImages';
-import { formatNumber } from '../utils/format';
 import { buttonVariants } from '@/components/ui/button';
 
 /** Seconds each hero photo stays before the next one. */
@@ -96,7 +95,6 @@ export const LandingPage: React.FC = () => {
   const index = useAutoSlide(SLIDES.length);
   const [, image] = SLIDES[index] ?? [];
   const member = session.kind === 'member';
-  const two = (n: number) => `${formatNumber(Math.floor(n / 10), language)}${formatNumber(n % 10, language)}`;
 
   return (
     // No outer frame (owner, 22 Nov 2026): the hero fills the left side edge to edge; the right side sits on the page.
@@ -159,10 +157,6 @@ export const LandingPage: React.FC = () => {
                       <span key={nameEn} className={`flex-1 h-0.5 rounded-full transition-colors ${i === index ? 'bg-white' : 'bg-white/35'}`} />
                     ))}
                   </div>
-                  <span className="text-sm font-en tabular-nums">
-                    <strong>{two(index + 1)}</strong>
-                    <span className="text-white/70"> - {two(SLIDES.length)}</span>
-                  </span>
                 </div>
                 <p className="inline-flex items-center gap-1.5 min-h-8 text-sm font-semibold">
                   <MapPin size={14} aria-hidden="true" />
