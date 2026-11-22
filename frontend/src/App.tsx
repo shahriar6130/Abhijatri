@@ -3,12 +3,11 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { LanguageProvider } from './context/LanguageContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SessionProvider } from './context/SessionContext';
-import { AppBackground } from './components/layout/AppBackground';
 import { UpdatePrompt } from './components/common/UpdatePrompt';
 import { useReconnectPackCheck } from './hooks/useOfflinePacks';
 import { AppLayout } from './components/layout/AppLayout';
 import { PublicLayout } from './components/layout/PublicLayout';
-import { LandingPage } from './pages/LandingPage';
+import { EntryLayout } from './components/layout/EntryLayout';
 import { GuestEntryPage } from './pages/GuestEntryPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { DestinationsPage } from './pages/DestinationsPage';
@@ -67,22 +66,24 @@ export const App: React.FC = () => {
     <ThemeProvider>
       <LanguageProvider>
         <SessionProvider>
-          <AppBackground />
           <UpdatePrompt />
           <PackReconnect />
           <BrowserRouter>
             <Routes>
               {/* Public entry: choose guest or sign in. It is an entry point, never a gate:
                   every app route below opens directly for guests (Execution.md rule 1). */}
-              <Route element={<PublicLayout />}>
-                <Route index element={<LandingPage />} />
+              {/* Front page and account pages share one frame so they slide into each other (owner, 22 Nov 2026). */}
+              <Route element={<EntryLayout />}>
+                <Route index element={null} />
                 <Route path="guest" element={<GuestEntryPage />} />
-                <Route path="privacy" element={<PrivacyPage />} />
                 <Route path="login" element={<SignInPage />} />
                 <Route path="register" element={<RegisterPage />} />
                 <Route path="verify-email" element={<VerifyEmailPage />} />
                 <Route path="forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="reset-password" element={<ResetPasswordPage />} />
+              </Route>
+              <Route element={<PublicLayout />}>
+                <Route path="privacy" element={<PrivacyPage />} />
               </Route>
 
               <Route element={<AppLayout />}>

@@ -85,7 +85,7 @@ export const GuestEntryPage: React.FC = () => {
       }
     };
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark">
             {t('অতিথি হিসেবে প্রবেশ', 'Continue as a guest')}
@@ -124,7 +124,7 @@ export const GuestEntryPage: React.FC = () => {
 
   if (!storedName) {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark">
             {t('অতিথি হিসেবে প্রবেশ', 'Continue as a guest')}
@@ -172,7 +172,7 @@ export const GuestEntryPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-14 flex flex-col gap-6">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
       <section className="tonal-card p-6 sm:p-8 flex flex-col gap-3 bg-surface-sage/60 dark:bg-dark-surface-1" aria-live="polite">
         <PartyPopper size={28} className="text-forest-primary dark:text-neon-lime" aria-hidden="true" />
         <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark wrap-anywhere">
@@ -256,7 +256,7 @@ const ReviewGuide: React.FC = () => {
       </h2>
       <ul className="flex flex-col gap-3 text-sm">
         <li className="flex gap-3">
-          <Star size={18} className="shrink-0 mt-0.5 fill-amber-400 text-amber-400" aria-hidden="true" />
+          <Star size={18} className="shrink-0 mt-0.5 fill-foreground text-foreground" aria-hidden="true" />
           <span>
             <strong>{t('সার্বিক রেটিং', 'Overall rating')}</strong>
             {': '}

@@ -11,7 +11,7 @@ export const PackNotices: React.FC = () => {
   const { notices } = useOfflinePacks();
   if (notices.length === 0) return null;
   return (
-    <div className="w-full bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-100 border-b border-sky-200 dark:border-sky-900">
+    <div className="w-full bg-muted text-foreground border-b border-border">
       {notices.map((n) => {
         const name = pick(language, n.name_bn, n.name_en) || t('একটি গন্তব্য', 'A destination');
         return (
@@ -26,7 +26,7 @@ export const PackNotices: React.FC = () => {
               type="button"
               onClick={() => dismissNotice(n.destinationId)}
               aria-label={t('বার্তাটি বন্ধ করুন', 'Dismiss')}
-              className="min-w-11 min-h-11 -my-2 flex items-center justify-center rounded-full hover:bg-sky-100 dark:hover:bg-sky-900"
+              className="min-w-11 min-h-11 -my-2 flex items-center justify-center rounded-full hover:bg-surface-container"
             >
               <X size={16} aria-hidden="true" />
             </button>

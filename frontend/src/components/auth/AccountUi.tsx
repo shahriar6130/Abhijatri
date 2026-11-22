@@ -155,9 +155,9 @@ export const PasswordInput: React.FC<PasswordInputProps> = ({ id, value, onChang
 
 export const Notice: React.FC<{ tone: 'info' | 'error' | 'success'; children: React.ReactNode }> = ({ tone, children }) => {
   const tones = {
-    info: 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-200',
+    info: 'bg-muted border-border text-foreground',
     error: 'bg-red-50 border-red-200 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200',
-    success: 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200',
+    success: 'bg-primary/10 border-primary/30 text-foreground',
   };
   return (
     <div role={tone === 'error' ? 'alert' : 'status'} className={`p-4 rounded-xl border text-sm ${tones[tone]}`}>

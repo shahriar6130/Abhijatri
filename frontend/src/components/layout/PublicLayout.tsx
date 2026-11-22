@@ -7,7 +7,7 @@ import { PreferenceToggles } from './PreferenceToggles';
 import { NetworkBanner, SessionExpiredBanner } from '../common/StatusBanners';
 import { PackNotices } from '../offline/PackNotices';
 
-/** Shell for pages outside the app (landing, sign-in): brand, preferences, no sidebar. */
+/** Shell for public pages outside the app and the entry frame (now the privacy notice): brand, preferences, no sidebar. */
 export const PublicLayout: React.FC = () => {
   const { t } = useLanguage();
 

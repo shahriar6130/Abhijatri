@@ -70,12 +70,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, isSidebarOpen }
             <span className="relative flex h-2 w-2">
               <span
                 className={`motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  apiOnline === true ? 'bg-emerald-accent' : apiOnline === false ? 'bg-error-alert' : 'bg-accent-green'
+                  apiOnline === true ? 'bg-primary' : apiOnline === false ? 'bg-error-alert' : 'bg-muted-foreground'
                 }`}
               ></span>
               <span
                 className={`relative inline-flex rounded-full h-2 w-2 ${
-                  apiOnline === true ? 'bg-emerald-accent' : apiOnline === false ? 'bg-error-alert' : 'bg-accent-green'
+                  apiOnline === true ? 'bg-primary' : apiOnline === false ? 'bg-error-alert' : 'bg-muted-foreground'
                 }`}
               ></span>
             </span>

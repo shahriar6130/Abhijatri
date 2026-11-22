@@ -26,7 +26,7 @@ export const FeatureUnavailable: React.FC<{
   return (
     <div className="flex flex-col gap-6 pb-12 max-w-3xl mx-auto">
       <div className="flex flex-col gap-2">
-        <span className="self-start inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-xs font-bold">
+        <span className="self-start inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-bold">
           <Clock size={13} aria-hidden="true" />
           {t('এখনো চালু হয়নি', 'Not available yet')}
         </span>
