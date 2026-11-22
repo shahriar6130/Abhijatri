@@ -99,12 +99,13 @@ export const LandingPage: React.FC = () => {
   const two = (n: number) => `${formatNumber(Math.floor(n / 10), language)}${formatNumber(n % 10, language)}`;
 
   return (
-    <div className="bg-surface-sage dark:bg-background px-3 py-3 sm:px-5 sm:py-5">
-      <div className="max-w-[1400px] mx-auto bg-card rounded-[2rem] shadow-[0_24px_64px_rgb(0_0_0/0.08)] dark:shadow-none dark:border dark:border-border overflow-hidden lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:min-h-[min(880px,calc(100vh-2.5rem))]">
+    // No outer frame (owner, 22 Nov 2026): the hero fills the left side edge to edge; the right side sits on the page.
+    <div className="bg-background">
+      <div className="lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:min-h-screen">
         {/* ---------- Hero ---------- */}
         <section
           aria-labelledby="landing-title"
-          className="relative isolate overflow-hidden min-h-[34rem] sm:min-h-[38rem] lg:min-h-0 rounded-b-[2.5rem] lg:rounded-bl-none lg:rounded-r-[4.5rem] bg-foreground text-white flex flex-col"
+          className="relative isolate overflow-hidden min-h-[34rem] sm:min-h-[38rem] lg:min-h-0 lg:sticky lg:top-0 lg:h-screen rounded-b-[2.5rem] lg:rounded-bl-none lg:rounded-r-[4.5rem] bg-foreground text-white flex flex-col"
         >
           {SLIDES.map(([nameEn, s], i) => {
             // Keep the previous, current and next photo in the page: the next one loads before it fades in.
@@ -176,17 +177,14 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* ---------- Guest or member ---------- */}
-        <section aria-label={t('কীভাবে শুরু করবেন', 'How to start')} className="min-w-0 flex flex-col gap-8 p-6 sm:p-9 lg:p-12">
+        <section aria-label={t('কীভাবে শুরু করবেন', 'How to start')} className="min-w-0 flex flex-col gap-8 px-5 py-6 sm:px-9 sm:py-8 lg:px-14 lg:py-10">
           <div className="flex justify-end">
             <PreferenceToggles />
           </div>
 
-          <div className="flex-1 flex flex-col justify-center gap-8">
+          <div className="flex-1 w-full max-w-md mx-auto flex flex-col justify-center gap-8">
             <div className="flex flex-col gap-5">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-2xl font-bold font-title text-foreground">{t('অতিথি হিসেবে দেখুন', 'Explore as a guest')}</h2>
-                <p className="text-sm text-muted-foreground">{t('কোনো অ্যাকাউন্ট বা ব্যক্তিগত তথ্য লাগবে না।', 'No account and no personal details needed.')}</p>
-              </div>
+              <h2 className="text-2xl font-bold font-title text-foreground">{t('অতিথি হিসেবে দেখুন', 'Explore as a guest')}</h2>
               <CapabilityList items={GUEST} />
               {member && (
                 <p className="text-xs text-muted-foreground wrap-anywhere">
@@ -206,10 +204,7 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <div className="flex flex-col gap-5">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-2xl font-bold font-title text-foreground">{t('সদস্য হিসেবে সাইন ইন', 'Sign in as a member')}</h2>
-                <p className="text-sm text-muted-foreground">{t('অতিথির সব সুবিধা, সাথে আরও কিছু।', 'Everything a guest can do, and more.')}</p>
-              </div>
+              <h2 className="text-2xl font-bold font-title text-foreground">{t('সদস্য হিসেবে সাইন ইন', 'Sign in as a member')}</h2>
               <CapabilityList items={MEMBER} />
               {member ? (
                 <Link to="/overview" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'rounded-xl' })}>
