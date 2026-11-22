@@ -17,6 +17,10 @@ from urllib.parse import urlsplit
 ALLOWED_DOCUMENTS = {
     "Docs/Abhijatri Project Gantt — CSE 3102.xlsx",
     "Docs/Abhijatri_Project_Proposal.pdf",
+    # Byte-identical copy of Abhijatri_Project_Proposal.pdf (same SHA-256); 25 pages, no attachments. The extracted
+    # text was scanned for connection strings, keys, tokens, URLs and email addresses on 22 November 2026 (no hit;
+    # "password" occurs only in requirement descriptions).
+    "Docs/Abhijatri_Project_Proposal_UseCase_Connected.pdf",
     "Security_Abhijatra.pdf",
     # Generated from repository documents; the full text was scanned for credentials, connection strings,
     # keys and email addresses on 30 October 2026 (no hit).
