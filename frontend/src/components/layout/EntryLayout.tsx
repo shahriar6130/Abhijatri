@@ -43,11 +43,12 @@ const FORM_PAGES: Record<string, 'guest' | 'member'> = {
 
 /**
  * The green background behind the account forms (owner, 22 Nov 2026: "the greenish gradient it had
- * before"). The same colours as the app-wide background removed earlier that day: pale mint on white,
- * deep green on near-black. Body text and the form boxes keep their contrast on the brightest mix.
+ * before"). Light: mint greens, a step stronger than the app-wide background removed earlier that day,
+ * so the curved edge shows against the white side beside it. Dark: deep greens on a green-tinted near-black, so the curve also shows in dark mode. Muted text
+ * (#5C5C5C) keeps at least 5.6:1 on the strongest light green (#BBF7D0); the forms sit in white boxes.
  */
-const GREEN_LIGHT = { bg: '#ffffff', colors: ['#dcfce7', '#f0fdf4', '#d1fae5', '#ffffff'] };
-const GREEN_DARK = { bg: '#0f0f0f', colors: ['#052e16', '#0f3d22', '#022c22', '#0f0f0f'] };
+const GREEN_LIGHT = { bg: '#f0fdf4', colors: ['#bbf7d0', '#dcfce7', '#a7f3d0', '#f0fdf4'] };
+const GREEN_DARK = { bg: '#12201a', colors: ['#052e16', '#0f3d22', '#022c22', '#12201a'] };
 
 /** Low memory, few cores or Data Saver: one still frame instead of an animation. */
 function lowEndDevice(): boolean {
@@ -298,19 +299,17 @@ export const EntryLayout: React.FC = () => {
             {...away('choice')}
             className="w-1/3 lg:w-[26.582%] h-full shrink-0 min-w-0 overflow-y-auto flex flex-col gap-6 px-5 pt-6 pb-24 sm:px-9 sm:pt-8 lg:px-12 lg:py-[clamp(1.25rem,4vh,2.5rem)] lg:gap-[clamp(0.75rem,2.6vh,2rem)]"
           >
-            <div className="flex items-center justify-between gap-3">
-              {/* With the hero slid away, the brand appears here and leads home. */}
-              <Link
-                to="/"
-                aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')}
-                className={`inline-flex items-center gap-2.5 min-h-11 motion-safe:transition-opacity motion-safe:duration-500 ${home ? 'invisible opacity-0' : 'opacity-100'}`}
-              >
-                <span className="w-9 h-9 rounded-full border-2 border-foreground flex items-center justify-center">
-                  <Compass size={18} aria-hidden="true" />
-                </span>
-                <span className="font-title text-lg font-bold">অভিযাত্রী</span>
-              </Link>
-              <PreferenceToggles />
+            {/* Front page: the switches. An account page: Back (the brand and switches move to the form side). */}
+            <div className="flex items-center justify-between gap-3 min-h-11">
+              {home ? (
+                <span />
+              ) : (
+                <Link to="/" className="inline-flex items-center gap-1.5 min-h-11 px-3 -ml-3 rounded-full text-sm font-semibold text-foreground hover:bg-muted">
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  {t('ফিরে যান', 'Back')}
+                </Link>
+              )}
+              {home && <PreferenceToggles />}
             </div>
 
             <div className="flex-1 w-full max-w-md mx-auto flex flex-col justify-center gap-5 lg:gap-[clamp(0.5rem,2vh,1.5rem)]">
@@ -377,18 +376,25 @@ export const EntryLayout: React.FC = () => {
             id="entry-form"
             aria-label={t('অ্যাকাউন্ট', 'Account')}
             {...away('form')}
-            className="w-1/3 lg:w-[36.709%] h-full shrink-0 lg:rounded-l-[4.5rem] overflow-hidden"
+            className="w-1/3 lg:w-[36.709%] h-full shrink-0 lg:rounded-l-[4.5rem] overflow-hidden lg:shadow-[-12px_0_40px_rgb(0_0_0/0.06)]"
           >
             <Velaris bg={green.bg} colors={green.colors} speed={3.5} grain={0.04} animate={!STILL && !home} className="h-full">
               <div ref={formPanel} tabIndex={-1} className="h-full overflow-y-auto outline-none">
-                <div className="min-h-full flex flex-col px-2 sm:px-6 lg:px-10 py-4">
-                  <Link
-                    to="/"
-                    className="self-start inline-flex items-center gap-1.5 min-h-11 px-3 rounded-full text-sm font-semibold text-foreground hover:bg-background/60"
-                  >
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    {t('ফিরে যান', 'Back')}
-                  </Link>
+                <div className="min-h-full flex flex-col px-4 sm:px-6 lg:pl-16 lg:pr-12 pt-4 lg:pt-[clamp(1.25rem,4vh,2.5rem)] pb-6">
+                  <div className="flex items-center justify-between gap-3">
+                    {/* On a phone the choice is off screen, so Back stays here. */}
+                    <Link to="/" className="lg:hidden inline-flex items-center gap-1.5 min-h-11 px-3 -ml-3 rounded-full text-sm font-semibold text-foreground hover:bg-muted">
+                      <ArrowLeft size={16} aria-hidden="true" />
+                      {t('ফিরে যান', 'Back')}
+                    </Link>
+                    <Link to="/" aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')} className="hidden lg:inline-flex items-center gap-2.5 min-h-11">
+                      <span className="w-9 h-9 rounded-full border-2 border-foreground flex items-center justify-center">
+                        <Compass size={18} aria-hidden="true" />
+                      </span>
+                      <span className="font-title text-lg font-bold">অভিযাত্রী</span>
+                    </Link>
+                    <PreferenceToggles />
+                  </div>
                   <div className="flex-1 flex flex-col justify-center">
                     <Suspense fallback={<LoadingState />}>{home ? (leaving ?? last.current) : outlet}</Suspense>
                   </div>
