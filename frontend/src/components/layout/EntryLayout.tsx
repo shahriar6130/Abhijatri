@@ -78,7 +78,7 @@ const MEMBER: Capability[] = [
 const CapabilityList: React.FC<{ items: Capability[] }> = ({ items }) => {
   const { t } = useLanguage();
   return (
-    <ul className="flex flex-col gap-2.5">
+    <ul className="flex flex-col gap-2.5 lg:gap-[clamp(0.25rem,1vh,0.625rem)]">
       {items.map(({ icon: Icon, bn, en }) => (
         <li key={en} className="flex items-start gap-3 text-sm">
           <span className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-muted text-foreground flex items-center justify-center">
@@ -191,7 +191,7 @@ export const EntryLayout: React.FC = () => {
   const wideShift = home ? 'lg:translate-x-0' : 'lg:-translate-x-[36.709%]';
 
   const option = (active: boolean) =>
-    `flex flex-col gap-4 lg:gap-[clamp(0.625rem,1.8vh,1.25rem)] rounded-3xl p-5 -mx-5 transition-colors ${
+    `flex flex-col gap-4 lg:gap-[clamp(0.5rem,1.5vh,1.125rem)] rounded-3xl p-5 -mx-5 lg:py-[clamp(0.625rem,2vh,1.25rem)] transition-colors ${
       active ? 'bg-primary/10 ring-1 ring-primary/40' : ''
     }`;
 
@@ -297,7 +297,7 @@ export const EntryLayout: React.FC = () => {
             id="entry-choice"
             aria-label={t('কীভাবে শুরু করবেন', 'How to start')}
             {...away('choice')}
-            className="w-1/3 lg:w-[26.582%] h-full shrink-0 min-w-0 overflow-y-auto flex flex-col gap-6 px-5 pt-6 pb-24 sm:px-9 sm:pt-8 lg:px-12 lg:py-[clamp(1.25rem,4vh,2.5rem)] lg:gap-[clamp(0.75rem,2.6vh,2rem)]"
+            className="w-1/3 lg:w-[26.582%] h-full shrink-0 min-w-0 overflow-y-auto flex flex-col gap-6 px-5 pt-6 pb-24 sm:px-9 sm:pt-8 lg:px-[clamp(1.5rem,3vw,3rem)] lg:py-[clamp(1rem,3vh,2.5rem)] lg:gap-[clamp(0.75rem,2.6vh,2rem)]"
           >
             {/* Front page: the switches. An account page: Back (the brand and switches move to the form side). */}
             <div className="flex items-center justify-between gap-3 min-h-11">
@@ -346,26 +346,14 @@ export const EntryLayout: React.FC = () => {
                     <ArrowRight size={16} aria-hidden="true" />
                   </Link>
                 ) : (
-                  <>
-                    <Link
-                      to="/login"
-                      aria-current={pathname === '/login' ? 'page' : undefined}
-                      className={buttonVariants({ variant: 'outline', size: 'lg', className: 'rounded-xl' })}
-                    >
-                      <LogIn size={16} aria-hidden="true" />
-                      {t('সাইন ইন', 'Sign in')}
-                    </Link>
-                    <p className="text-sm text-muted-foreground text-center">
-                      {t('অ্যাকাউন্ট নেই? ', 'No account yet? ')}
-                      <Link
-                        to="/register"
-                        aria-current={pathname === '/register' ? 'page' : undefined}
-                        className="font-semibold text-foreground underline underline-offset-4 hover:text-primary"
-                      >
-                        {t('অ্যাকাউন্ট খুলুন', 'Create one')}
-                      </Link>
-                    </p>
-                  </>
+                  <Link
+                    to="/login"
+                    aria-current={pathname === '/login' ? 'page' : undefined}
+                    className={buttonVariants({ variant: 'outline', size: 'lg', className: 'rounded-xl' })}
+                  >
+                    <LogIn size={16} aria-hidden="true" />
+                    {t('সাইন ইন', 'Sign in')}
+                  </Link>
                 )}
               </div>
             </div>

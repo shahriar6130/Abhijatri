@@ -79,7 +79,7 @@ export const RegisterPage: React.FC = () => {
 
   if (sentTo && created) {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
         <div className="tonal-card p-6 flex flex-col gap-3">
           <MailCheck size={28} className="text-forest-primary dark:text-neon-lime" aria-hidden="true" />
           <h1 className="text-2xl font-bold font-title text-on-surface dark:text-on-dark">{t('অ্যাকাউন্ট তৈরি হয়েছে', 'Account created')}</h1>
@@ -96,7 +96,7 @@ export const RegisterPage: React.FC = () => {
 
   if (sentTo) {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
         <div className="tonal-card p-6 flex flex-col gap-3">
           <MailCheck size={28} className="text-forest-primary dark:text-neon-lime" aria-hidden="true" />
           <h1 className="text-2xl font-bold font-title text-on-surface dark:text-on-dark">{t('ইমেইল দেখুন', 'Check your email')}</h1>
@@ -122,7 +122,7 @@ export const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+    <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark">{t('অ্যাকাউন্ট খুলুন', 'Create an account')}</h1>
         <p className="text-sm text-on-surface-variant dark:text-on-dark-muted">

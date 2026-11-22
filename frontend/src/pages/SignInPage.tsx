@@ -64,7 +64,7 @@ export const SignInPage: React.FC = () => {
 
   if (session.kind === 'member') {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
         <Notice tone="success">
           {t(`আপনি ${session.displayName} হিসেবে সাইন ইন করা আছেন।`, `You are signed in as ${session.displayName}.`)}
         </Notice>
@@ -77,7 +77,7 @@ export const SignInPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+    <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark">{t('সাইন ইন', 'Sign in')}</h1>
         <p className="text-sm text-on-surface-variant dark:text-on-dark-muted">

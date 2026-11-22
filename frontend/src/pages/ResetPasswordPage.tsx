@@ -64,7 +64,7 @@ export const ResetPasswordPage: React.FC = () => {
 
   if (done) {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)]">
         <div className="tonal-card p-6 flex flex-col gap-3">
           <CheckCircle2 size={28} className="text-forest-primary dark:text-neon-lime" aria-hidden="true" />
           <h1 className="text-2xl font-bold font-title text-on-surface dark:text-on-dark">{t('পাসওয়ার্ড বদলানো হয়েছে', 'Password changed')}</h1>
@@ -81,7 +81,7 @@ export const ResetPasswordPage: React.FC = () => {
 
   if (!tokenHash || linkDead) {
     return (
-      <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-4">
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-4">
         <Notice tone="error">{formError ?? t('রিসেট লিংকে কোড নেই। ইমেইলের পুরো লিংকটি খুলুন।', 'The reset link has no code. Open the full link from the email.')}</Notice>
         <Link to="/forgot-password" className={linkClass}>
           {t('নতুন রিসেট লিংক চান', 'Ask for a new reset link')}
@@ -91,7 +91,7 @@ export const ResetPasswordPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4 sm:px-6 py-10 sm:py-16 flex flex-col gap-6">
+    <div className="max-w-md mx-auto px-4 sm:px-6 py-4 lg:py-[clamp(0.5rem,2vh,1.5rem)] flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl sm:text-3xl font-bold font-title text-on-surface dark:text-on-dark">{t('নতুন পাসওয়ার্ড দিন', 'Choose a new password')}</h1>
       </div>
