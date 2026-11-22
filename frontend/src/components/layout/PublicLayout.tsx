@@ -14,7 +14,8 @@ export const PublicLayout: React.FC = () => {
   const landing = useLocation().pathname === '/';
 
   return (
-    <div className="min-h-screen flex flex-col text-on-surface dark:text-on-dark">
+    // The front page is exactly one screen high (owner, 22 Nov 2026): nothing scrolls.
+    <div className={`${landing ? 'h-dvh overflow-hidden' : 'min-h-screen'} flex flex-col text-on-surface dark:text-on-dark`}>
       {!landing && (
       <header className="w-full bg-background/80 border-b border-surface-muted/30 dark:border-dark-surface-2">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
@@ -32,18 +33,21 @@ export const PublicLayout: React.FC = () => {
       <NetworkBanner />
       <SessionExpiredBanner />
         <PackNotices />
-      <main className="flex-1 w-full">
+      <main className={`flex-1 w-full ${landing ? 'min-h-0' : ''}`}>
         <Suspense fallback={<LoadingState />}>
             <Outlet />
           </Suspense>
       </main>
 
+      {/* The front page has no footer (owner, 22 Nov 2026). */}
+      {!landing && (
       <footer className="bg-background/80 border-t border-surface-muted/30 dark:border-dark-surface-2">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-5 text-xs text-on-surface-variant dark:text-on-dark-muted flex flex-wrap gap-x-4 gap-y-1 justify-between">
+        <div className={`max-w-6xl mx-auto px-4 sm:px-6 py-5 text-xs text-on-surface-variant dark:text-on-dark-muted flex flex-wrap gap-x-4 gap-y-1 justify-between`}>
           <span>{t('অভিযাত্রী: বাংলাদেশ ভ্রমণের বাংলা-প্রথম সঙ্গী', 'Abhijatri: a Bangla-first travel companion for Bangladesh')}</span>
           <span>{t('জরুরি প্রয়োজনে ৯৯৯-এ কল করুন', 'In an emergency, call 999')}</span>
         </div>
       </footer>
+      )}
     </div>
   );
 };

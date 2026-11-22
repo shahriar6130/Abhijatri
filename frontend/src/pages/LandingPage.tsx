@@ -84,10 +84,26 @@ function useAutoSlide(count: number): number {
   return count > 0 ? current % count : 0;
 }
 
+/** True from the `lg` breakpoint (1024 px), where both sides are shown together. */
+function useWide(): boolean {
+  const query = '(min-width: 1024px)';
+  const [wide, setWide] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const changed = () => setWide(list.matches);
+    list.addEventListener('change', changed);
+    return () => list.removeEventListener('change', changed);
+  }, []);
+  return wide;
+}
+
+type View = 'hero' | 'start';
+
 /**
- * The front page (UI refresh, 22 Nov 2026), framed after the owner's reference: a photo hero of the
- * destinations on the left (brand, promise, photos that change by themselves), and on the right the
- * language and theme switches and the choice between guest and member. Stacked on small screens.
+ * The front page (UI refresh, 22 Nov 2026), after the owner's reference.
+ * Desktop: the photo hero fills the left side and the guest or member choice the right; the page is
+ * exactly one screen high with the footer, and sizes follow the screen height so nothing scrolls.
+ * Phone: one side at a time; a switch at the bottom slides between them.
  */
 export const LandingPage: React.FC = () => {
   const { language, t } = useLanguage();
@@ -95,15 +111,38 @@ export const LandingPage: React.FC = () => {
   const index = useAutoSlide(SLIDES.length);
   const [, image] = SLIDES[index] ?? [];
   const member = session.kind === 'member';
+  const wide = useWide();
+  const [view, setView] = useState<View>('hero');
+  // On a phone the side that is slid away cannot be reached with Tab or a screen reader.
+  const away = (side: View) => (!wide && view !== side ? ({ inert: '', 'aria-hidden': true } as object) : {});
+
+  const switchButton = (side: View, label: [string, string]) => (
+    <button
+      type="button"
+      aria-pressed={view === side}
+      aria-controls={`landing-${side}`}
+      onClick={() => setView(side)}
+      className={`relative z-10 flex-1 min-h-11 px-4 rounded-full text-sm font-semibold transition-colors ${
+        view === side ? 'text-primary-foreground' : 'text-background/80 hover:text-background'
+      }`}
+    >
+      {t(...label)}
+    </button>
+  );
 
   return (
-    // No outer frame (owner, 22 Nov 2026): the hero fills the left side edge to edge; the right side sits on the page.
-    <div className="bg-background">
-      <div className="lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:min-h-screen">
+    <div className="relative h-full overflow-hidden bg-background">
+      <div
+        className={`flex h-full w-[200%] lg:w-auto lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-out ${
+          view === 'start' ? '-translate-x-1/2' : 'translate-x-0'
+        } lg:translate-x-0`}
+      >
         {/* ---------- Hero ---------- */}
         <section
+          id="landing-hero"
           aria-labelledby="landing-title"
-          className="relative isolate overflow-hidden min-h-[34rem] sm:min-h-[38rem] lg:min-h-0 lg:sticky lg:top-0 lg:h-screen rounded-b-[2.5rem] lg:rounded-bl-none lg:rounded-r-[4.5rem] bg-foreground text-white flex flex-col"
+          {...away('hero')}
+          className="relative isolate overflow-hidden w-1/2 lg:w-auto h-full rounded-b-[2rem] lg:rounded-bl-none lg:rounded-r-[4.5rem] bg-foreground text-white flex flex-col"
         >
           {SLIDES.map(([nameEn, s], i) => {
             // Keep the previous, current and next photo in the page: the next one loads before it fades in.
@@ -128,7 +167,7 @@ export const LandingPage: React.FC = () => {
           <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-t from-black/85 via-black/35 to-black/40" />
           <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-r from-black/45 to-transparent" />
 
-          <div className="flex-1 flex flex-col p-7 sm:p-10 lg:p-14 gap-8">
+          <div className="flex-1 min-h-0 flex flex-col gap-6 px-7 pt-7 pb-24 sm:px-10 sm:pt-10 lg:p-[clamp(1.75rem,5.5vh,3.5rem)] lg:gap-[clamp(1rem,3vh,2rem)]">
             <Link to="/" className="self-start inline-flex items-center gap-3 min-h-11" aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')}>
               <span className="w-10 h-10 rounded-full border-2 border-white/90 flex items-center justify-center">
                 <Compass size={20} aria-hidden="true" />
@@ -136,11 +175,14 @@ export const LandingPage: React.FC = () => {
               <span className="font-title text-xl font-bold">অভিযাত্রী</span>
             </Link>
 
-            <div className="mt-auto flex flex-col gap-5 max-w-xl">
-              <h1 id="landing-title" className="text-4xl sm:text-5xl lg:text-6xl font-bold font-title leading-[1.08] text-balance">
+            <div className="mt-auto flex flex-col gap-4 lg:gap-[clamp(0.75rem,2.2vh,1.25rem)] max-w-xl">
+              <h1
+                id="landing-title"
+                className="text-4xl sm:text-5xl lg:text-[clamp(2.25rem,6.4vh,3.75rem)] font-bold font-title leading-[1.08] text-balance"
+              >
                 {t('যাওয়ার আগে জানুন, ফিরে এসে জানান', 'Know before you go. Share when you are back.')}
               </h1>
-              <p className="text-base sm:text-lg leading-relaxed text-white/85 max-w-lg">
+              <p className="text-base sm:text-lg lg:text-[clamp(0.95rem,2.1vh,1.125rem)] leading-relaxed text-white/85 max-w-lg">
                 {t(
                   'সূত্র ও তারিখসহ গন্তব্য গাইড, নিরাপত্তা সতর্কতা, জরুরি নম্বর আর মডারেশন করা ভ্রমণকারীর রিভিউ, বাংলায় ও ইংরেজিতে।',
                   'Source-dated destination guides, safety advisories, emergency numbers and moderated traveller reviews, in Bangla and English.',
@@ -149,14 +191,12 @@ export const LandingPage: React.FC = () => {
             </div>
 
             {image && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 {/* Shows where the slideshow is; not a control. */}
-                <div className="flex items-center gap-4" aria-hidden="true">
-                  <div className="flex gap-1.5 w-40 sm:w-56">
-                    {SLIDES.map(([nameEn], i) => (
-                      <span key={nameEn} className={`flex-1 h-0.5 rounded-full transition-colors ${i === index ? 'bg-white' : 'bg-white/35'}`} />
-                    ))}
-                  </div>
+                <div className="flex gap-1.5 w-40 sm:w-56" aria-hidden="true">
+                  {SLIDES.map(([nameEn], i) => (
+                    <span key={nameEn} className={`flex-1 h-0.5 rounded-full transition-colors ${i === index ? 'bg-white' : 'bg-white/35'}`} />
+                  ))}
                 </div>
                 <p className="inline-flex items-center gap-1.5 min-h-8 text-sm font-semibold">
                   <MapPin size={14} aria-hidden="true" />
@@ -171,14 +211,19 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* ---------- Guest or member ---------- */}
-        <section aria-label={t('কীভাবে শুরু করবেন', 'How to start')} className="min-w-0 flex flex-col gap-8 px-5 py-6 sm:px-9 sm:py-8 lg:px-14 lg:py-10">
+        <section
+          id="landing-start"
+          aria-label={t('কীভাবে শুরু করবেন', 'How to start')}
+          {...away('start')}
+          className="w-1/2 lg:w-auto h-full min-w-0 overflow-y-auto flex flex-col gap-6 px-5 pt-6 pb-24 sm:px-9 sm:pt-8 lg:px-14 lg:py-[clamp(1.25rem,4vh,2.5rem)] lg:gap-[clamp(0.75rem,2.6vh,2rem)]"
+        >
           <div className="flex justify-end">
             <PreferenceToggles />
           </div>
 
-          <div className="flex-1 w-full max-w-md mx-auto flex flex-col justify-center gap-8">
-            <div className="flex flex-col gap-5">
-              <h2 className="text-2xl font-bold font-title text-foreground">{t('অতিথি হিসেবে দেখুন', 'Explore as a guest')}</h2>
+          <div className="flex-1 w-full max-w-md mx-auto flex flex-col justify-center gap-6 lg:gap-[clamp(0.75rem,2.8vh,2rem)]">
+            <div className="flex flex-col gap-4 lg:gap-[clamp(0.625rem,1.8vh,1.25rem)]">
+              <h2 className="text-2xl lg:text-[clamp(1.25rem,3vh,1.5rem)] font-bold font-title text-foreground">{t('অতিথি হিসেবে দেখুন', 'Explore as a guest')}</h2>
               <CapabilityList items={GUEST} />
               {member && (
                 <p className="text-xs text-muted-foreground wrap-anywhere">
@@ -197,8 +242,8 @@ export const LandingPage: React.FC = () => {
               <span className="h-px flex-1 bg-border" />
             </div>
 
-            <div className="flex flex-col gap-5">
-              <h2 className="text-2xl font-bold font-title text-foreground">{t('সদস্য হিসেবে সাইন ইন', 'Sign in as a member')}</h2>
+            <div className="flex flex-col gap-4 lg:gap-[clamp(0.625rem,1.8vh,1.25rem)]">
+              <h2 className="text-2xl lg:text-[clamp(1.25rem,3vh,1.5rem)] font-bold font-title text-foreground">{t('সদস্য হিসেবে সাইন ইন', 'Sign in as a member')}</h2>
               <CapabilityList items={MEMBER} />
               {member ? (
                 <Link to="/overview" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'rounded-xl' })}>
@@ -214,6 +259,22 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
         </section>
+      </div>
+
+      {/* Phone only: slides between the two sides. The green thumb marks the side on screen. */}
+      <div
+        role="group"
+        aria-label={t('প্রথম পাতার অংশ', 'Front page sections')}
+        className="lg:hidden absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[min(20rem,calc(100%-2rem))] flex p-1 rounded-full bg-foreground/90 backdrop-blur shadow-[0_8px_24px_rgb(0_0_0/0.25)]"
+      >
+        <span
+          aria-hidden="true"
+          className={`absolute top-1 bottom-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-300 ${
+            view === 'start' ? 'translate-x-full' : 'translate-x-0'
+          }`}
+        />
+        {switchButton('hero', ['পরিচিতি', 'About'])}
+        {switchButton('start', ['শুরু করুন', 'Get started'])}
       </div>
     </div>
   );
