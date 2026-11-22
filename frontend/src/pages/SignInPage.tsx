@@ -145,14 +145,6 @@ export const SignInPage: React.FC = () => {
           )}
         </p>
       </form>
-
-      <Link
-        to="/overview"
-        className="self-center inline-flex items-center gap-2 min-h-[44px] px-5 rounded-full bg-surface-sage dark:bg-dark-surface-1 text-forest-primary dark:text-neon-lime text-sm font-bold font-title"
-      >
-        {t('অতিথি হিসেবে চালিয়ে যান', 'Continue as guest')}
-        <ArrowRight size={16} aria-hidden="true" />
-      </Link>
     </div>
   );
 };

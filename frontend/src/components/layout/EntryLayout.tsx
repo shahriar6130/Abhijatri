@@ -165,6 +165,30 @@ export const EntryLayout: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [home, outlet]);
 
+  // Moving between account pages (guest, sign in, create account...) fades the form side out, then the
+  // new page in (owner, 22 Nov 2026). Arriving from the front page needs no fade: the side slides in.
+  const [shownPath, setShownPath] = useState(pathname); // the account page whose content is on screen
+  const cameFromHome = useRef(home);
+  const fadingOut = !home && !cameFromHome.current && shownPath !== pathname && FORM_PAGES[shownPath] !== undefined;
+  const shownOutlet = useRef<React.ReactNode>(null);
+  if (!home && !fadingOut) shownOutlet.current = outlet;
+  // The key restarts the fade-in for a new page; it stays put while the form side slides back home.
+  const contentKey = useRef(pathname);
+  if (!home) contentKey.current = fadingOut ? shownPath : pathname;
+  useEffect(() => {
+    if (home) {
+      cameFromHome.current = true;
+      return;
+    }
+    if (cameFromHome.current || shownPath === pathname || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      cameFromHome.current = false;
+      setShownPath(pathname);
+      return;
+    }
+    const timer = window.setTimeout(() => setShownPath(pathname), 180);
+    return () => window.clearTimeout(timer);
+  }, [pathname, shownPath, home]);
+
   // After the slide, put focus on the form side so keyboard and screen-reader users land on it.
   const formPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -383,8 +407,13 @@ export const EntryLayout: React.FC = () => {
                     </Link>
                     <PreferenceToggles />
                   </div>
-                  <div className="flex-1 flex flex-col justify-center">
-                    <Suspense fallback={<LoadingState />}>{home ? (leaving ?? last.current) : outlet}</Suspense>
+                  <div
+                    key={contentKey.current}
+                    className={`flex-1 flex flex-col justify-center motion-safe:transition-opacity motion-safe:duration-200 ${
+                      fadingOut ? 'opacity-0' : 'opacity-100 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300'
+                    }`}
+                  >
+                    <Suspense fallback={<LoadingState />}>{home ? (leaving ?? last.current) : fadingOut ? shownOutlet.current : outlet}</Suspense>
                   </div>
                 </div>
               </div>
