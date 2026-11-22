@@ -161,7 +161,7 @@ export const LandingPage: React.FC = () => {
                   </div>
                   <span className="text-sm font-en tabular-nums">
                     <strong>{two(index + 1)}</strong>
-                    <span className="text-white/70"> — {two(SLIDES.length)}</span>
+                    <span className="text-white/70"> - {two(SLIDES.length)}</span>
                   </span>
                 </div>
                 <p className="inline-flex items-center gap-1.5 min-h-8 text-sm font-semibold">
