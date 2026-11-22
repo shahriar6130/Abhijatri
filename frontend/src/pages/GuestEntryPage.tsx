@@ -11,6 +11,7 @@ import { CATEGORY_LABEL } from '../components/reviews/reviewLabels';
 import { formatNumber } from '../utils/format';
 import { LoadingState, SlowNetworkHint } from '../components/common/StatusViews';
 import { buttonVariants } from '@/components/ui/button';
+import { inputClass } from '../components/auth/AccountUi';
 import { useGuardedSignOut } from '../components/reviews/useGuardedSignOut';
 
 /**
@@ -151,7 +152,8 @@ export const GuestEntryPage: React.FC = () => {
               autoFocus
               aria-invalid={Boolean(error)}
               aria-describedby={error ? 'guest-name-error' : undefined}
-              className="w-full px-3.5 min-h-[44px] rounded-xl bg-surface-sage/40 dark:bg-dark-surface-2 border border-surface-muted/50 dark:border-dark-surface-2 text-sm text-on-surface dark:text-on-dark aria-invalid:border-error-alert"
+              // Same field style as the sign-in and account forms, so the border shows in both themes.
+              className={inputClass}
             />
             {error && (
               <p id="guest-name-error" className="text-xs text-error-alert dark:text-red-400">
