@@ -8,8 +8,8 @@ import { ProvenanceNote } from './ProvenanceNote';
 const SEVERITY_STYLE: Record<AdvisorySeverity, { icon: typeof Info; box: string; ink: string }> = {
   INFO: {
     icon: Info,
-    box: 'bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-900/50',
-    ink: 'text-sky-900 dark:text-sky-200',
+    box: 'bg-muted border-border',
+    ink: 'text-foreground',
   },
   CAUTION: {
     icon: AlertTriangle,
@@ -18,8 +18,8 @@ const SEVERITY_STYLE: Record<AdvisorySeverity, { icon: typeof Info; box: string;
   },
   WARNING: {
     icon: AlertTriangle,
-    box: 'bg-orange-50 border-orange-300 dark:bg-orange-950/30 dark:border-orange-900/60',
-    ink: 'text-orange-900 dark:text-orange-200',
+    box: 'bg-amber-100 border-amber-400 dark:bg-amber-950/50 dark:border-amber-700',
+    ink: 'text-amber-950 dark:text-amber-100',
   },
   CRITICAL: {
     icon: AlertOctagon,

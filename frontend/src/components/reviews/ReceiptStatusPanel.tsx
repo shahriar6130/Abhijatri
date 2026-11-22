@@ -204,7 +204,7 @@ export const ReceiptStatusPanel: React.FC = () => {
             </p>
           )}
           {status.appeal_state && <p className="text-xs font-semibold">{t(...APPEAL_STATE_TEXT[status.appeal_state])}</p>}
-          {notice && <p role="status" className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">{notice}</p>}
+          {notice && <p role="status" className="text-xs font-semibold text-primary">{notice}</p>}
 
           {canEdit(status.status) && !editing && (
             <button type="button" onClick={() => setEditing(true)} className="self-start inline-flex items-center gap-2 min-h-[44px] px-4 rounded-full bg-forest-primary text-white dark:bg-neon-lime dark:text-dark-bg-base text-xs font-bold">

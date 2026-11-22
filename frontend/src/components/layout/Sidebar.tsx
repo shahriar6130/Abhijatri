@@ -227,7 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unsentDrafts 
                     {t(item.labelBn, item.labelEn)}
                   </span>
                   {item.soon && (
-                    <span className="ml-auto px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                    <span className="ml-auto px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-bold">
                       {t('শীঘ্রই', 'Soon')}
                     </span>
                   )}

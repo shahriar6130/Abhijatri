@@ -33,7 +33,7 @@ export const PendingDraftsBanner: React.FC<{ count: number }> = ({ count }) => {
 
   const n = formatNumber(count, language);
   return (
-    <div className="w-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-100 border-b border-emerald-200 dark:border-emerald-900">
+    <div className="w-full bg-primary/10 text-foreground border-b border-primary/30">
       <div role="status" className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <FileText size={16} className="shrink-0" aria-hidden="true" />
         <span className="flex-1 min-w-48">
@@ -49,7 +49,7 @@ export const PendingDraftsBanner: React.FC<{ count: number }> = ({ count }) => {
           type="button"
           onClick={() => setVisible(false)}
           aria-label={t('বার্তাটি বন্ধ করুন', 'Dismiss')}
-          className="min-w-11 min-h-11 -my-2 flex items-center justify-center rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900"
+          className="min-w-11 min-h-11 -my-2 flex items-center justify-center rounded-full hover:bg-primary/15"
         >
           <X size={16} aria-hidden="true" />
         </button>

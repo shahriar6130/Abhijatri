@@ -66,8 +66,8 @@ export const ReceiptPanel: React.FC<{ review: SubmittedReview; onDone: () => voi
   };
 
   return (
-    <section aria-labelledby="receipt-heading" className="tonal-card p-6 flex flex-col gap-4 border-emerald-300 dark:border-emerald-800">
-      <div className="flex items-center gap-3 text-emerald-700 dark:text-emerald-400">
+    <section aria-labelledby="receipt-heading" className="tonal-card p-6 flex flex-col gap-4 border-primary/40">
+      <div className="flex items-center gap-3 text-primary">
         <CheckCircle2 size={24} aria-hidden="true" />
         <h2 id="receipt-heading" ref={headingRef} tabIndex={-1} className="font-bold text-lg font-title">
           {review.duplicate_recovered
@@ -117,7 +117,7 @@ export const ReceiptPanel: React.FC<{ review: SubmittedReview; onDone: () => voi
         </p>
       )}
       {Boolean(review.mediaUploaded) && (
-        <p className="text-sm text-emerald-800 dark:text-emerald-300">
+        <p className="text-sm text-primary">
           {t(
             `${review.mediaUploaded}টি ছবি/ভিডিও আপলোড হয়েছে; মডারেটর অনুমোদনের পর দেখা যাবে।`,
             `${review.mediaUploaded} photo(s)/video uploaded; they appear after a moderator approves them.`,
@@ -135,7 +135,7 @@ export const ReceiptPanel: React.FC<{ review: SubmittedReview; onDone: () => voi
         </div>
       )}
 
-      <dl className="p-4 rounded-xl bg-white dark:bg-dark-surface-2 border border-emerald-200 dark:border-emerald-800 font-mono text-xs text-on-surface dark:text-on-dark flex flex-col gap-2 break-all">
+      <dl className="p-4 rounded-xl bg-white dark:bg-dark-surface-2 border border-primary/30 font-mono text-xs text-on-surface dark:text-on-dark flex flex-col gap-2 break-all">
         <div>
           <dt className="font-sans font-bold text-on-surface-variant dark:text-on-dark-muted">{t('রিভিউ আইডি', 'Review ID')}</dt>
           <dd className="select-all">{review.review_id}</dd>

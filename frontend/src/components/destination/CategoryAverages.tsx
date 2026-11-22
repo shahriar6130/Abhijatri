@@ -26,7 +26,7 @@ export const CategoryAverages: React.FC<{ averages?: CategoryAverage[]; title: s
               </span>
             </div>
             <div className="h-1.5 rounded-full bg-surface-container dark:bg-dark-surface-2 overflow-hidden" aria-hidden="true">
-              <div className="h-full rounded-full bg-amber-400" style={{ width: `${(average / 5) * 100}%` }} />
+              <div className="h-full rounded-full bg-foreground" style={{ width: `${(average / 5) * 100}%` }} />
             </div>
           </li>
         ))}

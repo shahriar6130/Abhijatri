@@ -262,6 +262,8 @@ Evidence: `tsc -b` clean, 123 tests pass, build clean. Browser (stubbed API): la
 
 ## 5f. App-wide animated background (6 November 2026)
 
+**Removed 22 Nov 2026 on `ui-refresh`** (section 5s): the page sits on the plain background colour.
+
 `frontend/src/components/ui/velaris.tsx` (adapted from the 21st.dev "Velaris" WebGL gradient) is the background of the whole app. `components/layout/AppBackground.tsx` mounts it once at the app root as a fixed, full-screen layer behind everything (`aria-hidden`), so it keeps running across page changes. The layouts no longer paint their own background; the top bars and sidebar are 80 to 90 percent opaque (no blur) and cards stay solid.
 
 | Theme | Page colour | Gradient colours |
@@ -483,6 +485,21 @@ Fifth requested Phase 1 update (`Handoff-Phase1-Updates.md`; Decisions 2026-11-1
 | Styles as classes only (the staff site's Content-Security-Policy allows no inline styles); the slide-in is skipped under reduced motion | `staff/src/styles.css` |
 
 Evidence (11 Nov 2026): `tsc -b` clean, 46 staff tests pass, `vite build` clean. Chrome with a local stand-in for the API that returns a made-up signed-in session and empty lists (no real account, no real data): at 1536 px the menu was open with ten sections for a superadmin, choosing Inbox changed the screen and the top bar and kept the menu open, and the button closed it; at 390 px (in a frame) the menu started closed, opened as an overlay with focus on the current section, and closed on Escape, on the backdrop and on a choice, each time returning focus to the button; no sideways scrolling at either width. **Not checked:** with a real staff sign-in and real data, the moderator role (fewer sections), Bangla, a real phone, a screen reader. **Not done:** the bundle served at `/staff` was not rebuilt (P5).
+
+## 5s. UI refresh: palette and front page (22 November 2026, branch `ui-refresh`)
+
+Owner request; Decisions 2026-11-22. Not merged: it is on `ui-refresh`, and `git diff ui-baseline ui-refresh -- frontend` shows every change.
+
+| Item | Files |
+|---|---|
+| Theme tokens: white and near-black, neutral greys, grass green accent (light #3F7A2B, dark #6FAF4F); old colour names point at them. Browser theme colour updated | `global.css`, `index.html`, `vite.config.ts` |
+| Animated background removed (section 5f no longer applies) | `App.tsx`; `components/layout/AppBackground.tsx` and `components/ui/velaris.tsx` deleted |
+| Colours outside the palette replaced: success notices green, information grey, warnings amber, ratings in the text colour, "Coming soon" badges grey | `AccountUi.tsx`, `StatusBanners.tsx`, `PackNotices.tsx`, `PendingDraftsBanner.tsx`, `AdvisoryCard.tsx`, `StatusChip.tsx`, `ReceiptPanel.tsx`, `ReceiptStatusPanel.tsx`, `HealthCheckPage.tsx`, `Navbar.tsx`, `Sidebar.tsx`, `FeatureUnavailable.tsx`, `RatingSummary.tsx`, `CategoryAverages.tsx`, `CategoryRatings.tsx`, `ReviewFeedSection.tsx`, `GuestEntryPage.tsx` |
+| Front page: photo hero with slider and pause, menu, greeting, search (opens Destinations with `?q=`), landscape tabs, destination cards, photo credits; the shared header is hidden on `/` because the page carries its own | `pages/LandingPage.tsx`, `components/layout/LandingMenu.tsx`, `components/layout/PublicLayout.tsx`, `pages/DestinationsPage.tsx`, `data/destinationImages.ts` |
+| The old destination selector is no longer used and is deleted | `components/ui/interactive-selector.tsx` |
+| The member list no longer says "Coming soon": accounts, Verified Member ratings and photos are live | `pages/LandingPage.tsx` |
+
+Evidence (22 Nov 2026): types clean, 241 tests pass, build clean; main JavaScript 109.8 KB gzip (110.5 before), CSS 13.6 KB (14.1 before). Headless Chrome driven over the DevTools protocol, with a local stand-in that serves only the five seeded destination names and regions (the live API answered 404 "Application not found" that day): the front page at 1440 and 1280 px (light, dark, Bangla, English) and at 390 and 360 px (light and dark) had no sideways scrolling, five cards and five tabs; the Destinations page at the same sizes had no sideways scrolling. **Not checked:** the slider moving (screenshots used reduced motion), keyboard and screen reader, a real phone, the pages that need the API (destination detail, reviews, account).
 
 ## 6. Defects found, reported to their owners, not fixed here
 

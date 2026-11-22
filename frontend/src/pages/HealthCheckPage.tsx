@@ -127,7 +127,7 @@ export const HealthCheckPage: React.FC = () => {
           <div className="flex items-center justify-between border-b border-surface-muted/30 dark:border-dark-surface-2 pb-4">
             <div className="flex items-center gap-3">
               {healthResult.status === 'ok' ? (
-                <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
                   <CheckCircle2 size={24} />
                 </div>
               ) : (
@@ -170,7 +170,7 @@ export const HealthCheckPage: React.FC = () => {
                 <span>{t('সার্ভার:', 'Server:')}</span>
               </div>
               <span className={`text-base font-bold font-en capitalize ${
-                healthResult.status === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                healthResult.status === 'ok' ? 'text-primary' : 'text-red-600 dark:text-red-400'
               }`}>
                 {healthResult.status}
               </span>
@@ -219,19 +219,19 @@ export const HealthCheckPage: React.FC = () => {
         </h3>
         <div className="divide-y divide-surface-muted/20 text-xs font-en">
           <div className="py-2.5 flex items-center justify-between">
-            <span className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">GET /api/v1/health</span>
+            <span className="font-mono text-foreground font-bold">GET /api/v1/health</span>
             <span className="text-on-surface-variant">{t('সার্ভার চালু আছে কিনা', 'Is the server running')}</span>
           </div>
           <div className="py-2.5 flex items-center justify-between">
-            <span className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">GET /api/v1/health/ready</span>
+            <span className="font-mono text-foreground font-bold">GET /api/v1/health/ready</span>
             <span className="text-on-surface-variant">{t('ডেটাবেস প্রস্তুত কিনা', 'Is the database ready')}</span>
           </div>
           <div className="py-2.5 flex items-center justify-between">
-            <span className="font-mono text-blue-700 dark:text-blue-400 font-bold">POST /api/v1/reviews/guest</span>
+            <span className="font-mono text-foreground font-bold">POST /api/v1/reviews/guest</span>
             <span className="text-on-surface-variant">{t('অতিথির রিভিউ জমা', 'Guest review submission')}</span>
           </div>
           <div className="py-2.5 flex items-center justify-between">
-            <span className="font-mono text-purple-700 dark:text-purple-400 font-bold">GET /api/v1/destinations/{'{id}'}/reviews</span>
+            <span className="font-mono text-foreground font-bold">GET /api/v1/destinations/{'{id}'}/reviews</span>
             <span className="text-on-surface-variant">{t('প্রকাশিত রিভিউ', 'Published reviews')}</span>
           </div>
         </div>

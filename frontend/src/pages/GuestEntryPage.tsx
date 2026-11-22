@@ -256,7 +256,7 @@ const ReviewGuide: React.FC = () => {
       </h2>
       <ul className="flex flex-col gap-3 text-sm">
         <li className="flex gap-3">
-          <Star size={18} className="shrink-0 mt-0.5 fill-amber-400 text-amber-400" aria-hidden="true" />
+          <Star size={18} className="shrink-0 mt-0.5 fill-foreground text-foreground" aria-hidden="true" />
           <span>
             <strong>{t('সার্বিক রেটিং', 'Overall rating')}</strong>
             {': '}

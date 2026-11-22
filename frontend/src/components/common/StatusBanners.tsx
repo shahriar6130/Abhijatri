@@ -46,7 +46,7 @@ export const NetworkBanner: React.FC = () => {
   }
   if (backOnline) {
     return (
-      <div role="status" aria-live="polite" className="w-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-100 border-b border-emerald-200 dark:border-emerald-900">
+      <div role="status" aria-live="polite" className="w-full bg-primary/10 text-foreground border-b border-primary/30">
         <p className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-2 text-sm">
           <CheckCircle2 size={16} aria-hidden="true" />
           {t('আবার অনলাইনে। প্রয়োজনে পাতাটি আবার লোড করুন।', 'Back online. Reload the page if something is missing.')}
@@ -63,21 +63,21 @@ export const SessionExpiredBanner: React.FC = () => {
   const { sessionExpired, dismissSessionExpired } = useSession();
   if (!sessionExpired) return null;
   return (
-    <div role="alert" className="w-full bg-sky-50 dark:bg-sky-950/50 text-sky-900 dark:text-sky-100 border-b border-sky-200 dark:border-sky-900">
+    <div role="alert" className="w-full bg-muted text-foreground border-b border-border">
       <div className="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
         <LogIn size={16} className="shrink-0" aria-hidden="true" />
         <span className="flex-1 min-w-48">
           <strong>{t('আপনার সেশনের মেয়াদ শেষ হয়েছে।', 'Your session has expired.')}</strong>{' '}
           {t('নিরাপত্তার জন্য আপনাকে সাইন আউট করা হয়েছে। চালিয়ে যেতে আবার সাইন ইন করুন।', 'You were signed out for security. Sign in again to continue.')}
         </span>
-        <SignInLink className="inline-flex items-center min-h-[40px] px-4 rounded-full bg-sky-800 text-white dark:bg-sky-300 dark:text-sky-950 text-xs font-bold">
+        <SignInLink className="inline-flex items-center min-h-[40px] px-4 rounded-full bg-primary text-primary-foreground text-xs font-bold">
           {t('আবার সাইন ইন', 'Sign in again')}
         </SignInLink>
         <button
           type="button"
           onClick={dismissSessionExpired}
           aria-label={t('বার্তাটি বন্ধ করুন', 'Dismiss')}
-          className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full hover:bg-sky-100 dark:hover:bg-sky-900"
+          className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full hover:bg-surface-container"
         >
           <X size={16} aria-hidden="true" />
         </button>

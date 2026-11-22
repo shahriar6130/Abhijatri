@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { LoadingState } from '../common/StatusViews';
 import { Compass } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
@@ -10,9 +10,12 @@ import { PackNotices } from '../offline/PackNotices';
 /** Shell for pages outside the app (landing, sign-in): brand, preferences, no sidebar. */
 export const PublicLayout: React.FC = () => {
   const { t } = useLanguage();
+  // The front page carries its own brand, menu and switches inside its frame (UI refresh, 22 Nov 2026).
+  const landing = useLocation().pathname === '/';
 
   return (
     <div className="min-h-screen flex flex-col text-on-surface dark:text-on-dark">
+      {!landing && (
       <header className="w-full bg-background/80 border-b border-surface-muted/30 dark:border-dark-surface-2">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           <Link to="/" className="flex items-center gap-2.5" aria-label={t('অভিযাত্রী হোম', 'Abhijatri home')}>
@@ -24,6 +27,7 @@ export const PublicLayout: React.FC = () => {
           <PreferenceToggles />
         </div>
       </header>
+      )}
 
       <NetworkBanner />
       <SessionExpiredBanner />

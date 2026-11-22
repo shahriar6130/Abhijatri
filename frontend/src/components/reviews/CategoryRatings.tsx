@@ -92,7 +92,7 @@ export const CategoryRatings: React.FC<{
                     <Star
                       size={20}
                       aria-hidden="true"
-                      className={current !== undefined && star <= current ? 'fill-amber-400 text-amber-400' : 'text-surface-muted dark:text-on-dark-muted'}
+                      className={current !== undefined && star <= current ? 'fill-foreground text-foreground' : 'text-surface-muted dark:text-on-dark-muted'}
                     />
                   </button>
                 ))}
@@ -120,7 +120,7 @@ export const CategoryRatings: React.FC<{
           <>
             <span className="inline-flex items-center gap-0.5" aria-hidden="true">
               {[1, 2, 3, 4, 5].map((star) => (
-                <Star key={star} size={18} className={star <= overall ? 'fill-amber-400 text-amber-400' : 'text-surface-muted dark:text-on-dark-muted'} />
+                <Star key={star} size={18} className={star <= overall ? 'fill-foreground text-foreground' : 'text-surface-muted dark:text-on-dark-muted'} />
               ))}
             </span>
             <span className="text-sm font-semibold text-on-surface dark:text-on-dark">

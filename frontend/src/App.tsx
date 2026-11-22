@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { LanguageProvider } from './context/LanguageContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SessionProvider } from './context/SessionContext';
-import { AppBackground } from './components/layout/AppBackground';
 import { UpdatePrompt } from './components/common/UpdatePrompt';
 import { useReconnectPackCheck } from './hooks/useOfflinePacks';
 import { AppLayout } from './components/layout/AppLayout';
@@ -67,7 +66,6 @@ export const App: React.FC = () => {
     <ThemeProvider>
       <LanguageProvider>
         <SessionProvider>
-          <AppBackground />
           <UpdatePrompt />
           <PackReconnect />
           <BrowserRouter>

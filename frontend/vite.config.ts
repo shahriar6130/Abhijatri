@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
           scope: '/',
           display: 'standalone',
           orientation: 'portrait',
-          theme_color: '#15803d',
+          theme_color: '#ffffff',
           background_color: '#ffffff',
           categories: ['travel'],
           icons: [

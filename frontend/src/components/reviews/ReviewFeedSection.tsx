@@ -216,7 +216,7 @@ export const ReviewFeedSection: React.FC<{ destinationId: string }> = ({ destina
                       key={n}
                       size={14}
                       aria-hidden="true"
-                      className={n <= review.overall_rating ? 'fill-amber-400 text-amber-400' : 'text-surface-muted dark:text-dark-surface-2'}
+                      className={n <= review.overall_rating ? 'fill-foreground text-foreground' : 'text-surface-muted dark:text-dark-surface-2'}
                     />
                   ))}
                 </span>

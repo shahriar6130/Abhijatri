@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, ArrowUpDown, MapPin, Search } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useDestinationCatalog } from '../hooks/useDestinationCatalog';
@@ -10,7 +10,9 @@ import { formatNumber, pick } from '../utils/format';
 
 export const DestinationsPage: React.FC = () => {
   const { language, t } = useLanguage();
-  const [query, setQuery] = useState('');
+  // The front page's search arrives as `?q=` (UI refresh, 22 Nov 2026).
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? '');
   const [sort, setSort] = useState<DestinationSort>('name');
   const { data: catalog, error, loading, reload } = useDestinationCatalog();
   const data = catalog?.items ?? null;

@@ -18,12 +18,12 @@ const ICON: Record<ReviewStatus, LucideIcon> = {
 const TONE: Record<ReviewStatus, string> = {
   PENDING: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
   UNDER_REVIEW: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
-  CHANGES_REQUESTED: 'bg-orange-50 text-orange-900 dark:bg-orange-950/40 dark:text-orange-200',
-  PUBLISHED: 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
-  HIDDEN: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200',
+  CHANGES_REQUESTED: 'bg-amber-100 text-amber-950 dark:bg-amber-950/60 dark:text-amber-100',
+  PUBLISHED: 'bg-primary/10 text-foreground',
+  HIDDEN: 'bg-muted text-foreground',
   REJECTED: 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200',
-  WITHDRAWN: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  DELETED: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  WITHDRAWN: 'bg-muted text-muted-foreground',
+  DELETED: 'bg-muted text-muted-foreground',
 };
 
 /** A review status as an icon plus words: colour is never the only signal (WCAG 1.4.1). */

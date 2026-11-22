@@ -5,65 +5,69 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Theme: shadcn/ui "stone" base with a green primary (Decisions 2026-11-04).
- * shadcn's green-600 primary has 3.3:1 contrast with white text, below WCAG AA (PF 20), so the light
- * theme uses green-700 (5.0:1); the dark theme uses green-500 with near-black text.
+ * Theme (UI refresh, Decisions 2026-11-22): two dominant colours and one accent.
+ *   Light: white and near-black. Dark: the same, inverted.
+ *   Accent: one grass green, for buttons, links and the current item only.
+ * The greys below are tints of the two dominant colours (no hue). Red and amber are kept for
+ * alerts only (errors, Delete, safety advisories, warnings); they are not decoration.
+ * Contrast (WCAG AA, PF 20): white on #3F7A2B is 5.2:1; #3F7A2B on white 5.2:1; #0F0F0F on #6FAF4F
+ * 7.2:1; #6FAF4F on #0F0F0F 7.2:1; muted text #5C5C5C on white 6.7:1, #A3A3A3 on #0F0F0F 7.5:1.
  * Fonts: Inter for interface and English text; Hind Siliguri supplies every Bangla glyph (Inter has
  * none), then system Bangla fonts if the web font has not loaded (Gantt F03 "system font fallback").
  */
 :root {
   --radius: 0.75rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.25); /* stone-950 */
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.147 0.004 49.25);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.147 0.004 49.25);
-  --primary: oklch(0.527 0.154 150.069); /* green-700 */
-  --primary-hover: oklch(0.448 0.119 151.328); /* green-800 */
-  --primary-foreground: oklch(0.982 0.018 155.826); /* green-50 */
-  --secondary: oklch(0.97 0.001 106.424); /* stone-100 */
-  --secondary-foreground: oklch(0.216 0.006 56.043); /* stone-900 */
-  --muted: oklch(0.97 0.001 106.424);
-  --muted-foreground: oklch(0.444 0.011 73.639); /* stone-600: keeps 4.5:1 on the mint background */
-  --accent: oklch(0.97 0.001 106.424);
-  --accent-foreground: oklch(0.216 0.006 56.043);
+  --background: #ffffff;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #3f7a2b;
+  --primary-hover: #346823;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #111111;
+  --muted: #f4f4f4;
+  --muted-foreground: #5c5c5c;
+  --accent: #f4f4f4;
+  --accent-foreground: #111111;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.923 0.003 48.717); /* stone-200 */
-  --input: oklch(0.923 0.003 48.717);
-  --ring: oklch(0.627 0.194 149.214); /* green-600 */
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #3f7a2b;
 
   /* App surfaces between card and border, used by the older colour names below. */
-  --surface: oklch(0.97 0.001 106.424); /* stone-100 */
-  --surface-strong: oklch(0.923 0.003 48.717); /* stone-200 */
-  --surface-border: oklch(0.869 0.005 56.366); /* stone-300 */
+  --surface: #f5f5f5;
+  --surface-strong: #ebebeb;
+  --surface-border: #d4d4d4;
 }
 
 .dark {
-  --background: oklch(0.147 0.004 49.25); /* stone-950 */
-  --foreground: oklch(0.985 0.001 106.423); /* stone-50 */
-  --card: oklch(0.216 0.006 56.043); /* stone-900 */
-  --card-foreground: oklch(0.985 0.001 106.423);
-  --popover: oklch(0.216 0.006 56.043);
-  --popover-foreground: oklch(0.985 0.001 106.423);
-  --primary: oklch(0.723 0.219 149.579); /* green-500 */
-  --primary-hover: oklch(0.792 0.209 151.711); /* green-400 */
-  --primary-foreground: oklch(0.147 0.004 49.25);
-  --secondary: oklch(0.268 0.007 34.298); /* stone-800 */
-  --secondary-foreground: oklch(0.985 0.001 106.423);
-  --muted: oklch(0.268 0.007 34.298);
-  --muted-foreground: oklch(0.709 0.01 56.259); /* stone-400 */
-  --accent: oklch(0.268 0.007 34.298);
-  --accent-foreground: oklch(0.985 0.001 106.423);
+  --background: #0f0f0f;
+  --foreground: #f5f5f5;
+  --card: #191919;
+  --card-foreground: #f5f5f5;
+  --popover: #191919;
+  --popover-foreground: #f5f5f5;
+  --primary: #6faf4f;
+  --primary-hover: #82be62;
+  --primary-foreground: #0f0f0f;
+  --secondary: #262626;
+  --secondary-foreground: #f5f5f5;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --accent-foreground: #f5f5f5;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.723 0.219 149.579);
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #6faf4f;
 
-  --surface: oklch(0.216 0.006 56.043); /* stone-900 */
-  --surface-strong: oklch(0.268 0.007 34.298); /* stone-800 */
-  --surface-border: oklch(0.374 0.01 67.558); /* stone-700 */
+  --surface: #191919;
+  --surface-strong: #262626;
+  --surface-border: #3a3a3a;
 }
 
 @theme inline {
@@ -100,19 +104,20 @@
   --color-surface-sage: var(--surface);
   --color-surface-container: var(--surface-strong);
   --color-surface-muted: var(--surface-border);
-  --color-accent-green: oklch(0.723 0.219 149.579);
+  --color-accent-green: var(--primary);
   --color-forest-primary: var(--primary);
   --color-forest-container: var(--primary-hover);
   --color-on-surface: var(--foreground);
   --color-on-surface-variant: var(--muted-foreground);
-  --color-dark-bg-base: oklch(0.147 0.004 49.25);
-  --color-dark-surface-1: oklch(0.216 0.006 56.043);
-  --color-dark-surface-2: oklch(0.268 0.007 34.298);
-  --color-neon-lime: oklch(0.723 0.219 149.579);
-  --color-pistachio-glow: oklch(0.792 0.209 151.711);
-  --color-emerald-accent: oklch(0.792 0.209 151.711);
-  --color-on-dark: oklch(0.985 0.001 106.423);
-  --color-on-dark-muted: oklch(0.709 0.01 56.259);
+  --color-dark-bg-base: #0f0f0f;
+  --color-dark-surface-1: #191919;
+  --color-dark-surface-2: #262626;
+  /* Old "lime" names now mean the dark theme's green; they are used with `dark:` only. */
+  --color-neon-lime: #6faf4f;
+  --color-pistachio-glow: #82be62;
+  --color-emerald-accent: var(--primary);
+  --color-on-dark: #f5f5f5;
+  --color-on-dark-muted: #a3a3a3;
   --color-error-alert: var(--destructive);
   --color-error-container: oklch(0.936 0.032 17.717); /* red-100 */
 
@@ -175,14 +180,14 @@
   color: var(--card-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Lift only cards that are links: lifting a large panel made it jitter under a resting cursor. */
 a.tonal-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px oklch(0 0 0 / 0.08);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.08);
 }
 
 ::-webkit-scrollbar {
@@ -197,16 +202,4 @@ a.tonal-card:hover {
 ::-webkit-scrollbar-thumb {
   background: var(--surface-border);
   border-radius: 9999px;
-}
-
-/* Entry motion for components/ui/interactive-selector; applied only under motion-safe. */
-@keyframes selector-in {
-  from {
-    opacity: 0;
-    transform: translateX(-2.5rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }

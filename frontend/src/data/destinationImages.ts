@@ -17,6 +17,8 @@ export interface DestinationImage {
   width: number;
   height: number;
   alt: { bn: string; en: string };
+  /** The place's name, for when the destination list has not loaded (front page hero). */
+  place: { bn: string; en: string };
   credit: {
     author: string;
     licence: string;
@@ -27,6 +29,7 @@ export interface DestinationImage {
 
 const IMAGES: Record<string, DestinationImage> = {
   "Cox's Bazar": {
+    place: { bn: 'কক্সবাজার', en: 'Cox\'s Bazar' },
     src: '/images/destinations/coxs-bazar.webp',
     srcSmall: '/images/destinations/coxs-bazar-480.webp',
     width: 1024,
@@ -43,6 +46,7 @@ const IMAGES: Record<string, DestinationImage> = {
     },
   },
   'Sajek Valley': {
+    place: { bn: 'সাজেক ভ্যালি', en: 'Sajek Valley' },
     src: '/images/destinations/sajek-valley.webp',
     srcSmall: '/images/destinations/sajek-valley-480.webp',
     width: 1024,
@@ -59,6 +63,7 @@ const IMAGES: Record<string, DestinationImage> = {
     },
   },
   Sylhet: {
+    place: { bn: 'সিলেট', en: 'Sylhet' },
     src: '/images/destinations/sylhet.webp',
     srcSmall: '/images/destinations/sylhet-480.webp',
     width: 1024,
@@ -75,6 +80,7 @@ const IMAGES: Record<string, DestinationImage> = {
     },
   },
   Sundarbans: {
+    place: { bn: 'সুন্দরবন', en: 'Sundarbans' },
     src: '/images/destinations/sundarbans.webp',
     srcSmall: '/images/destinations/sundarbans-480.webp',
     width: 1024,
@@ -91,6 +97,7 @@ const IMAGES: Record<string, DestinationImage> = {
     },
   },
   Bandarban: {
+    place: { bn: 'বান্দরবান', en: 'Bandarban' },
     src: '/images/destinations/bandarban.webp',
     srcSmall: '/images/destinations/bandarban-480.webp',
     width: 1024,
@@ -110,4 +117,9 @@ const IMAGES: Record<string, DestinationImage> = {
 
 export function destinationImage(nameEn: string): DestinationImage | undefined {
   return IMAGES[nameEn];
+}
+
+/** Every licensed photo with its destination's English name, in a fixed order (front page hero and credits). */
+export function allDestinationImages(): [string, DestinationImage][] {
+  return Object.entries(IMAGES);
 }

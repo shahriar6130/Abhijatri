@@ -79,7 +79,7 @@ export const RatingSummary: React.FC<{ community: Rating; guest: Rating; compact
         {t('অতিথি মতামত', 'Guest Feedback')}{' '}
         {guest.average !== null && guest.count > 0 ? (
           <>
-            <Star size={12} className="fill-amber-400 text-amber-400" aria-hidden="true" />
+            <Star size={12} className="fill-foreground text-foreground" aria-hidden="true" />
             {formatNumber(guest.average, language, 1)}
             <span className="opacity-75">
               {t(
